@@ -147,6 +147,8 @@ type AppEnumCollectionUserRole {
   label: String!
 }
 
+union BulkCreateGalleryImagesPayload = GalleryImageTypeListMutationResponseType | OperationInfo
+
 union BulkCreateTeamMembersPayload = TeamMemberTypeListMutationResponseType | OperationInfo
 
 union BulkUpdateExternalDashboardsPayload = ExternalDashboardTypeListMutationResponseType | OperationInfo
@@ -223,8 +225,6 @@ union CreateCapacityAndResourcePayload = CapacityAndResourceTypeMutationResponse
 union CreateExternalDashboardPayload = ExternalDashboardTypeMutationResponseType | OperationInfo
 
 union CreateGalleryAlbumPayload = GalleryAlbumTypeMutationResponseType | OperationInfo
-
-union CreateGalleryImagePayload = GalleryImageTypeMutationResponseType | OperationInfo
 
 union CreateLinkPayload = LinkTypeMutationResponseType | OperationInfo
 
@@ -576,6 +576,10 @@ input GalleryAlbumUpdateInput {
   coverImage: ID
 }
 
+input GalleryImageBulkCreateInput {
+  images: [GalleryImageCreateInput!]!
+}
+
 input GalleryImageCreateInput {
   album: ID!
   image: Upload!
@@ -618,10 +622,10 @@ type GalleryImageType {
   uploadedAt: DateTime!
 }
 
-type GalleryImageTypeMutationResponseType {
+type GalleryImageTypeListMutationResponseType {
   ok: Boolean!
   errors: CustomErrorType
-  result: GalleryImageType
+  result: [GalleryImageType!]
 }
 
 type GalleryImageTypeOffsetPaginated {
@@ -998,7 +1002,7 @@ type Mutation {
   deleteCapacityAndResource(id: ID!): DeleteMutationResponseType!
   createGalleryAlbum(data: GalleryAlbumCreateInput!): CreateGalleryAlbumPayload!
   updateGalleryAlbum(id: ID!, data: GalleryAlbumUpdateInput!): UpdateGalleryAlbumPayload!
-  createGalleryImage(data: GalleryImageCreateInput!): CreateGalleryImagePayload!
+  bulkCreateGalleryImages(data: GalleryImageBulkCreateInput!): BulkCreateGalleryImagesPayload!
   deleteGalleryImage(id: ID!): DeleteMutationResponseType!
   deleteGalleryAlbum(id: ID!): DeleteMutationResponseType!
   createTeam(data: TeamCreateInput!): CreateTeamPayload!

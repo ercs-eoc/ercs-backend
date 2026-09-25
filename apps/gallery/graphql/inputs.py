@@ -21,3 +21,8 @@ class GalleryImageCreateInput:
     image: Upload
     caption: str | None = strawberry.UNSET
     order: int = 0
+
+
+@strawberry.input
+class GalleryImageBulkCreateInput:
+    images: list[GalleryImageCreateInput]
