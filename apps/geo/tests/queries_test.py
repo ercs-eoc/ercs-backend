@@ -9,7 +9,7 @@ class TestAdminAreaQueries(TestCase):
     class Query:
         ADMIN_AREAS = """
             query AdminAreas($pagination: OffsetPaginationInput, $filters: AdminAreaFilter) {
-                adminAreas(pagination: $pagination, filters: $filters, order: {name: ASC}) {
+                adminAreas(pagination: $pagination, filters: $filters, ordering: {name: ASC}) {
                     totalCount
                     pageInfo { offset limit }
                     results {

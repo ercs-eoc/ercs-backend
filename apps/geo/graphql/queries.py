@@ -11,7 +11,7 @@ from .types import AdminAreaType
 class Query:
     admin_areas: OffsetPaginated[AdminAreaType] = strawberry_django.offset_paginated(
         filters=AdminAreaFilter,
-        order=AdminAreaOrder,
+        ordering=AdminAreaOrder,
     )
 
     admin_area: AdminAreaType = strawberry_django.field()

@@ -11,7 +11,7 @@ class TestExternalDashboardQueries(TestCase):
     class Query:
         DASHBOARDS = """
             query ExternalDashboards($pagination: OffsetPaginationInput, $filters: ExternalDashboardFilter) {
-                externalDashboards(pagination: $pagination, filters: $filters, order: {page: ASC}) {
+                externalDashboards(pagination: $pagination, filters: $filters, ordering: {page: ASC}) {
                     totalCount
                     pageInfo { offset limit }
                     results {
@@ -72,7 +72,7 @@ class TestCapacityAndResourceQueries(TestCase):
     class Query:
         CAPACITY_AND_RESOURCES = """
             query CapacityAndResources($pagination: OffsetPaginationInput, $filters: CapacityAndResourceFilter) {
-                capacityAndResources(pagination: $pagination, filters: $filters, order: {order: ASC}) {
+                capacityAndResources(pagination: $pagination, filters: $filters, ordering: {order: ASC}) {
                     totalCount
                     pageInfo { offset limit }
                     results {

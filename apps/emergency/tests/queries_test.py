@@ -8,7 +8,7 @@ class TestEmergencyQueries(TestCase):
     class Query:
         EMERGENCIES = """
             query Emergencies($pagination: OffsetPaginationInput) {
-                emergencies(pagination: $pagination, order: {startDate: DESC}) {
+                emergencies(pagination: $pagination, ordering: {startDate: DESC}) {
                     totalCount
                     pageInfo { offset limit }
                     results {

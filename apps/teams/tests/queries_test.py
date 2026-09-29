@@ -9,7 +9,7 @@ class TestTeamQueries(TestCase):
     class Query:
         TEAMS = """
             query Teams($pagination: OffsetPaginationInput) {
-                teams(pagination: $pagination, order: {name: ASC}) {
+                teams(pagination: $pagination, ordering: {name: ASC}) {
                     totalCount
                     pageInfo { offset limit }
                     results {

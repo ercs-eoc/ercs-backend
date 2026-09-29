@@ -234,6 +234,9 @@ else:
     MEDIA_ROOT = env("MEDIA_ROOT")
     STATIC_ROOT = env("STATIC_ROOT")
 
+# Above the gallery bulk-upload limit so oversized batches get a GraphQL error instead of a bare 400
+DATA_UPLOAD_MAX_NUMBER_FILES = 200
+
 TRUSTED_ORIGINS = [
     APP_DOMAIN.geturl(),
     FRONTEND_DOMAIN.geturl(),

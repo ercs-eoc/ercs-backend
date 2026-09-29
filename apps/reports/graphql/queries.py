@@ -23,12 +23,12 @@ class Query:
 
     public_links: OffsetPaginated[LinkType] = strawberry_django.offset_paginated(
         filters=LinkFilter,
-        order=LinkOrder,
+        ordering=LinkOrder,
     )
 
     internal_links: OffsetPaginated[LinkType] = strawberry_django.offset_paginated(
         filters=LinkFilter,
-        order=LinkOrder,
+        ordering=LinkOrder,
         permission_classes=[IsAuthenticated],
     )
 

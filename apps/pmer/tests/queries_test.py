@@ -11,7 +11,7 @@ class TestPmerReportQueries(TestCase):
     class Query:
         PMER_REPORTS = """
             query PmerReports($pagination: OffsetPaginationInput, $filters: PmerReportFilter) {
-                pmerReports(pagination: $pagination, filters: $filters, order: {title: ASC}) {
+                pmerReports(pagination: $pagination, filters: $filters, ordering: {title: ASC}) {
                     totalCount
                     pageInfo { offset limit }
                     results {

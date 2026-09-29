@@ -13,7 +13,7 @@ from .types import GalleryAlbumType, GalleryImageType
 class Query:
     gallery_albums: OffsetPaginated[GalleryAlbumType] = strawberry_django.offset_paginated(
         filters=GalleryAlbumFilter,
-        order=GalleryAlbumOrder,
+        ordering=GalleryAlbumOrder,
         permission_classes=[IsAuthenticated],
     )
 
@@ -23,6 +23,6 @@ class Query:
 
     gallery_images: OffsetPaginated[GalleryImageType] = strawberry_django.offset_paginated(
         filters=GalleryImageFilter,
-        order=GalleryImageOrder,
+        ordering=GalleryImageOrder,
         permission_classes=[IsAuthenticated],
     )

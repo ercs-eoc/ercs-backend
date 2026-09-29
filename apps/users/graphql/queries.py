@@ -23,7 +23,7 @@ class Query:
 
     users: OffsetPaginated[UserType] = strawberry_django.offset_paginated(
         filters=UserFilter,
-        order=UserOrder,
+        ordering=UserOrder,
         permission_classes=[IsAuthenticated],
     )
 

@@ -9,7 +9,7 @@ class TestGalleryQueries(TestCase):
     class Query:
         ALBUMS = """
             query GalleryAlbums($pagination: OffsetPaginationInput) {
-                galleryAlbums(pagination: $pagination, order: {createdAt: DESC}) {
+                galleryAlbums(pagination: $pagination, ordering: {createdAt: DESC}) {
                     totalCount
                     pageInfo { offset limit }
                     results {

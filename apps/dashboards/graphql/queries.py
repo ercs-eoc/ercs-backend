@@ -11,14 +11,14 @@ from .types import CapacityAndResourceType, ExternalDashboardType
 class Query:
     external_dashboards: OffsetPaginated[ExternalDashboardType] = strawberry_django.offset_paginated(
         filters=ExternalDashboardFilter,
-        order=ExternalDashboardOrder,
+        ordering=ExternalDashboardOrder,
     )
 
     external_dashboard: ExternalDashboardType = strawberry_django.field()
 
     capacity_and_resources: OffsetPaginated[CapacityAndResourceType] = strawberry_django.offset_paginated(
         filters=CapacityAndResourceFilter,
-        order=CapacityAndResourceOrder,
+        ordering=CapacityAndResourceOrder,
     )
 
     capacity_and_resource: CapacityAndResourceType = strawberry_django.field()

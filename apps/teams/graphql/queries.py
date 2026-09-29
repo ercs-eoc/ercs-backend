@@ -14,7 +14,7 @@ from .types import TeamMemberType, TeamType
 class Query:
     teams: OffsetPaginated[TeamType] = strawberry_django.offset_paginated(
         filters=TeamFilter,
-        order=TeamOrder,
+        ordering=TeamOrder,
         permission_classes=[IsAuthenticated],
     )
 
@@ -24,7 +24,7 @@ class Query:
 
     team_members: OffsetPaginated[TeamMemberType] = strawberry_django.offset_paginated(
         filters=TeamMemberFilter,
-        order=TeamMemberOrder,
+        ordering=TeamMemberOrder,
         permission_classes=[IsAuthenticated],
     )
 

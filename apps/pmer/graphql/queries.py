@@ -11,7 +11,7 @@ from .types import PmerReportType
 class Query:
     pmer_reports: OffsetPaginated[PmerReportType] = strawberry_django.offset_paginated(
         filters=PmerReportFilter,
-        order=PmerReportOrder,
+        ordering=PmerReportOrder,
     )
 
     pmer_report: PmerReportType = strawberry_django.field()

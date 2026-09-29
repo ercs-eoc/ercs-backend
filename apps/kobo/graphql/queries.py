@@ -31,7 +31,7 @@ class Query:
 
     # Approved ERCS Emergency Alerts, shaped as an emergencies list (paginated).
     kobo_emergencies: OffsetPaginated[KoboEmergencyType] = strawberry_django.offset_paginated(
-        order=KoboSubmissionOrder,
+        ordering=KoboSubmissionOrder,
     )
 
     # Full detail for one alert (by submission id) + its linked RNA / field reports.
@@ -53,6 +53,6 @@ class Query:
 
     kobo_submissions: OffsetPaginated[KoboSubmissionType] = strawberry_django.offset_paginated(
         filters=KoboSubmissionFilter,
-        order=KoboSubmissionOrder,
+        ordering=KoboSubmissionOrder,
     )
     kobo_submission: KoboSubmissionType = strawberry_django.field()

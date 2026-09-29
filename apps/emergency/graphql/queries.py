@@ -11,7 +11,7 @@ from .types import EmergencyType
 class Query:
     emergencies: OffsetPaginated[EmergencyType] = strawberry_django.offset_paginated(
         filters=EmergencyFilter,
-        order=EmergencyOrder,
+        ordering=EmergencyOrder,
     )
 
     emergency: EmergencyType = strawberry_django.field()

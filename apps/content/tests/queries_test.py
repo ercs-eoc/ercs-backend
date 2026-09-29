@@ -9,7 +9,7 @@ class TestNewsPostQueries(TestCase):
     class Query:
         NEWS_POSTS = """
             query NewsPosts($pagination: OffsetPaginationInput, $filters: NewsPostFilter) {
-                newsPosts(pagination: $pagination, filters: $filters, order: {createdAt: DESC}) {
+                newsPosts(pagination: $pagination, filters: $filters, ordering: {createdAt: DESC}) {
                     totalCount
                     pageInfo { offset limit }
                     results {
