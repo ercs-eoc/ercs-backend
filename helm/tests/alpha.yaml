@@ -1,6 +1,6 @@
 # Dummy values injected by cluster operators / CICD at deploy time.
 # Only present so the alpha overlay can be rendered standalone for snapshot
-# testing (see ../tests.yaml — this file is auto-appended by fugit).
+# testing (listed in ../tests.yaml).
 app:
   image:
     name: local.example.com/toggle-corp/ercs-backend

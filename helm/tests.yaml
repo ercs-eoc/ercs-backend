@@ -1,6 +1,6 @@
 # Snapshot test matrix consumed by ./update-snapshots.sh (fugit).
 # Each key is a snapshot under ./snapshots/, rendered from values.yaml (base)
-# + the listed values files + the auto-appended per-snapshot ./tests/<key>.
+# + the listed values files (in order).
 #   - values/operators.yaml : operator-managed infra (Dragonfly) + redis env
 #   - values/traefik.yaml    : traefik ingress class + body-size Middleware
 #   - values/<env>.yaml      : the environment overlay
@@ -10,3 +10,4 @@ tests:
     - values/operators.yaml
     - values/traefik.yaml
     - values/alpha.yaml
+    - tests/alpha.yaml

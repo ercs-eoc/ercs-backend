@@ -16,4 +16,4 @@ app:
         name: ercs-body-size
       spec:
         buffering:
-          maxRequestBodyBytes: 20971520  # 20Mi (previously proxy-body-size: 20m)
+          maxRequestBodyBytes: 104857600 # 100 MiB
