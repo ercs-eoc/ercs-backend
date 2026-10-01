@@ -571,4 +571,4 @@ metadata:
   name: ercs-body-size
 spec:
   buffering:
-    maxRequestBodyBytes: 20971520
+    maxRequestBodyBytes: 104857600
