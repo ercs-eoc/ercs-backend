@@ -169,6 +169,7 @@ class DocumentExtraction(BaseModel):
         TITLE = 7, "Title"
         DESCRIPTION = 8, "Description"
         DOCUMENT_SUMMARY_SHORT = 9, "Document Summary Short"
+        DOCUMENT_SUMMARY_SECTION = 10, "Document Summary Section"
 
     report = models.ForeignKey(
         Report,
@@ -179,6 +180,13 @@ class DocumentExtraction(BaseModel):
     page_number = models.IntegerField(null=True, blank=True, db_index=True)
     chunk_type = IntegerChoicesField(choices_enum=ExtractionType, default=ExtractionType.DOCUMENT_SUMMARY)  # type: ignore[reportAssignmentType]
     embedding = VectorField(dimensions=768, null=True, blank=True)
+    # Used only by DOCUMENT_SUMMARY_SECTION chunks: one row per document holding a
+    # list of {"topic", "label", "content", "embedding"} entries (the doc's topical
+    # summary sections, e.g. overview/impacts/etc, plus its short summary), each
+    # independently embedded so a query can match a single topic without diluting
+    # the signal across the whole document summary. `embedding` above stays null
+    # for these rows since there is no single vector representing all of them.
+    section_embeddings = models.JSONField(default=list, blank=True)
     status: int = IntegerChoicesField(choices_enum=DocumentExtractionStatus, default=DocumentExtractionStatus.PENDING)  # type: ignore[reportAssignmentType]
 
     class Meta:  # type: ignore[reportIncompatibleVariableOverride]

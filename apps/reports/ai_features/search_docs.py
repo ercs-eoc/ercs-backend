@@ -1,3 +1,4 @@
+import math
 import re
 import typing
 from collections import defaultdict
@@ -25,6 +26,9 @@ WEIGHTS: dict[int, float] = {
     DocumentExtraction.ExtractionType.TITLE: 1.00,
     DocumentExtraction.ExtractionType.DOCUMENT_SUMMARY: 0.8,
     DocumentExtraction.ExtractionType.DOCUMENT_SUMMARY_SHORT: 0.98,
+    # Topical slices of the doc summary (overview, impacts, etc.) - as trustworthy
+    # as the summary they were split from, since they carry the same curated content.
+    DocumentExtraction.ExtractionType.DOCUMENT_SUMMARY_SECTION: 0.8,
     DocumentExtraction.ExtractionType.PAGE_SUMMARY: 0.80,
     DocumentExtraction.ExtractionType.DESCRIPTION: 0.80,
     DocumentExtraction.ExtractionType.KEYWORDS: 0.70,
@@ -33,6 +37,24 @@ WEIGHTS: dict[int, float] = {
     DocumentExtraction.ExtractionType.CHART: 0.45,
 }
 DEFAULT_CHUNK_WEIGHT = 0.5
+
+# Cosine similarity between a short query and a full sentence/paragraph chunk is
+# structurally capped lower than sentence-vs-sentence similarity, regardless of
+# relevance - a query at or under this many tokens can't reach `score_threshold`
+# even for its own unambiguous best match (verified: single-word queries for an
+# indexed report's own title/keywords scored 0.39-0.43; two words, ~0.53).
+SHORT_QUERY_TOKEN_LIMIT = 2
+# For short queries, full-text rank separates true from false matches far better
+# than semantic similarity does: verified against a "cyclone" vs "tsunami" query
+# pair, keyword score was ~0 for the irrelevant term and > 0 for the relevant one,
+# while raw semantic similarity alone actually ranked the irrelevant term higher.
+SHORT_QUERY_SEMANTIC_WEIGHT = 0.35
+SHORT_QUERY_KEYWORD_WEIGHT = 0.65
+# Lower than `score_threshold`: leaning on keyword_weight shrinks the whole score
+# scale for short queries (keyword rank is a smaller number than cosine similarity),
+# so the floor has to shrink with it - set to the midpoint between the weakest
+# true match and strongest false match seen on the test corpus (0.188 vs 0.150).
+SHORT_QUERY_SCORE_THRESHOLD = 0.17
 
 # Decayed additive bonus for supporting chunks beyond the best match, so a report
 # with more relevant evidence can only ever score higher, never lower.
@@ -43,6 +65,16 @@ MAX_SUPPORTING_CHUNKS = 3
 
 def _normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", text.strip().lower())
+
+
+def _cosine_similarity(vector_a: list[float], vector_b: list[float]) -> float:
+    """Cosine similarity clamped to [0, 1], mirroring the DB-side score from CosineDistance."""
+    dot_product = sum(a * b for a, b in zip(vector_a, vector_b, strict=True))
+    norm_a = math.sqrt(sum(a * a for a in vector_a))
+    norm_b = math.sqrt(sum(b * b for b in vector_b))
+    if not norm_a or not norm_b:
+        return 0.0
+    return max(dot_product / (norm_a * norm_b), 0.0)
 
 
 class ChunkScore(typing.TypedDict):
@@ -71,13 +103,16 @@ class SearchReports:
     def __post_init__(self):
         self.llm_embedding_model = get_embedding_llm_handler().load_embedding_model()
 
+    def is_short_query(self) -> bool:
+        """Whether the query is short enough that semantic similarity is an unreliable signal."""
+        return len(_normalize_text(self.query).split()) <= SHORT_QUERY_TOKEN_LIMIT
+
     def generate_query_embedding(self) -> list[float]:
         """Return the vector of the query."""
         return self.llm_embedding_model.embed_query(self.query)
 
-    def get_semantic_scores(self, k_top: int = 100) -> dict[int, float]:
+    def get_semantic_scores(self, query_vector: list[float], k_top: int = 100) -> dict[int, float]:
         """Return chunk id -> cosine similarity score for the top matching chunks."""
-        query_vector = self.generate_query_embedding()
         results = (
             DocumentExtraction.objects.filter(status=DocumentExtractionStatus.SUCCESS)
             .filter(embedding__isnull=False)
@@ -92,6 +127,32 @@ class SearchReports:
             .order_by("-score")[:k_top]
         )
         return {result.pk: result.score for result in results}  # type: ignore[attr-defined]
+
+    def get_section_semantic_scores(self, query_vector: list[float], k_top: int = 100) -> dict[int, float]:
+        """Return chunk id -> best cosine similarity across a doc-summary-section row's topics.
+
+        DOCUMENT_SUMMARY_SECTION rows keep one embedding per topic (overview, impacts,
+        short summary, etc.) in `section_embeddings` rather than the single indexed
+        `embedding` column, so this comparison runs in Python instead of via pgvector's
+        operator. A report matches through this row via whichever topic is most relevant,
+        without diluting the signal against its other, unrelated topics.
+        """
+        rows = DocumentExtraction.objects.filter(
+            status=DocumentExtractionStatus.SUCCESS,
+            chunk_type=DocumentExtraction.ExtractionType.DOCUMENT_SUMMARY_SECTION,
+        ).exclude(section_embeddings=[])
+
+        scores: dict[int, float] = {}
+        for row in rows:
+            best_score = max(
+                (_cosine_similarity(query_vector, section["embedding"]) for section in row.section_embeddings),
+                default=0.0,
+            )
+            if best_score > 0:
+                scores[row.pk] = best_score
+
+        top_scores = sorted(scores.items(), key=lambda item: item[1], reverse=True)[:k_top]
+        return dict(top_scores)
 
     def get_keyword_scores(self, k_top: int = 100) -> dict[int, float]:
         """Return chunk id -> normalized full-text-search rank for the top matching chunks."""
@@ -110,8 +171,18 @@ class SearchReports:
         Caps how many chunks any single report can contribute so a large, comprehensive
         document can't occupy the whole candidate pool and starve smaller reports out.
         """
-        semantic_scores = self.get_semantic_scores(k_top)
+        query_vector = self.generate_query_embedding()
+        # Disjoint by construction: DOCUMENT_SUMMARY_SECTION rows have embedding=None,
+        # so they never appear in get_semantic_scores - safe to merge without collision.
+        semantic_scores = self.get_semantic_scores(query_vector, k_top)
+        semantic_scores.update(self.get_section_semantic_scores(query_vector, k_top))
         keyword_scores = self.get_keyword_scores(k_top)
+
+        semantic_weight, keyword_weight = (
+            (SHORT_QUERY_SEMANTIC_WEIGHT, SHORT_QUERY_KEYWORD_WEIGHT)
+            if self.is_short_query()
+            else (self.semantic_weight, self.keyword_weight)
+        )
 
         chunks = DocumentExtraction.objects.filter(
             pk__in=set(semantic_scores) | set(keyword_scores),
@@ -119,8 +190,7 @@ class SearchReports:
 
         for chunk in chunks:
             chunk.score = (  # type: ignore[attr-defined]
-                semantic_scores.get(chunk.pk, 0.0) * self.semantic_weight
-                + keyword_scores.get(chunk.pk, 0.0) * self.keyword_weight
+                semantic_scores.get(chunk.pk, 0.0) * semantic_weight + keyword_scores.get(chunk.pk, 0.0) * keyword_weight
             )
 
         ranked_chunks = sorted(chunks, key=lambda chunk: chunk.score, reverse=True)  # type: ignore[attr-defined]
@@ -192,8 +262,10 @@ class SearchReports:
         exact_matches = [doc for doc in ranked_docs if doc[1] == float("inf")]
         scored_docs = [doc for doc in ranked_docs if doc[1] != float("inf")]
 
+        threshold = min(self.score_threshold, SHORT_QUERY_SCORE_THRESHOLD) if self.is_short_query() else self.score_threshold
+
         strong_docs = exact_matches
-        if scored_docs and scored_docs[0][1] >= self.score_threshold:
+        if scored_docs and scored_docs[0][1] >= threshold:
             cutoff = self.relative_cutoff * scored_docs[0][1]
             strong_docs += [doc for doc in scored_docs if doc[1] >= cutoff]
         return [reports_by_id[report_id] for report_id, _ in strong_docs[:top_k]]
