@@ -1,10 +1,12 @@
 import math
+import operator
 import re
 import typing
 from collections import defaultdict
 from dataclasses import dataclass, field
+from functools import reduce
 
-from django.contrib.postgres.search import SearchQuery, SearchRank
+from django.contrib.postgres.search import SearchQuery, SearchRank, SearchVector
 from django.db.models.functions import Greatest
 from langchain_core.embeddings import Embeddings
 from pgvector.django import CosineDistance
@@ -55,6 +57,11 @@ SHORT_QUERY_KEYWORD_WEIGHT = 0.65
 # so the floor has to shrink with it - set to the midpoint between the weakest
 # true match and strongest false match seen on the test corpus (0.188 vs 0.150).
 SHORT_QUERY_SCORE_THRESHOLD = 0.17
+# Three/four-word queries ("flooding in Minas Gerais") still score below
+# `score_threshold` for their true match (0.496 on the test corpus) but above unrelated
+# queries' best match (0.42-0.44, e.g. "volcanic eruption in Iceland").
+MID_QUERY_TOKEN_LIMIT = 4
+MID_QUERY_SCORE_THRESHOLD = 0.45
 
 # Decayed additive bonus for supporting chunks beyond the best match, so a report
 # with more relevant evidence can only ever score higher, never lower.
@@ -79,7 +86,7 @@ def _cosine_similarity(vector_a: list[float], vector_b: list[float]) -> float:
 
 class ChunkScore(typing.TypedDict):
     score: float
-    chunk_type: str
+    chunk_type: int
 
 
 @dataclass
@@ -106,6 +113,29 @@ class SearchReports:
     def is_short_query(self) -> bool:
         """Whether the query is short enough that semantic similarity is an unreliable signal."""
         return len(_normalize_text(self.query).split()) <= SHORT_QUERY_TOKEN_LIMIT
+
+    def is_mid_query(self) -> bool:
+        return not self.is_short_query() and len(_normalize_text(self.query).split()) <= MID_QUERY_TOKEN_LIMIT
+
+    def get_term_matched_report_ids(self) -> set[int]:
+        """Reports with at least one chunk containing any (stemmed) query term.
+
+        Semantic similarity of a few-word query is too flat to tell an unrelated report
+        from a relevant one (e.g. a content-free report titled "Field photos" scores
+        within 0.07 of the best "cholera" match), so short queries also require the
+        report to actually mention one of the query's words.
+        """
+        terms = re.findall(r"\w+", self.query)
+        if not terms:
+            return set()
+        search_query = reduce(operator.or_, (SearchQuery(term) for term in terms))
+        return set(
+            DocumentExtraction.objects.filter(status=DocumentExtractionStatus.SUCCESS)
+            .annotate(search=SearchVector("text"))
+            .filter(search=search_query)
+            .values_list("report_id", flat=True)
+            .distinct(),
+        )
 
     def generate_query_embedding(self) -> list[float]:
         """Return the vector of the query."""
@@ -262,7 +292,16 @@ class SearchReports:
         exact_matches = [doc for doc in ranked_docs if doc[1] == float("inf")]
         scored_docs = [doc for doc in ranked_docs if doc[1] != float("inf")]
 
-        threshold = min(self.score_threshold, SHORT_QUERY_SCORE_THRESHOLD) if self.is_short_query() else self.score_threshold
+        if self.is_short_query() or self.is_mid_query():
+            term_matched = self.get_term_matched_report_ids()
+            scored_docs = [doc for doc in scored_docs if doc[0] in term_matched]
+
+        if self.is_short_query():
+            threshold = min(self.score_threshold, SHORT_QUERY_SCORE_THRESHOLD)
+        elif self.is_mid_query():
+            threshold = min(self.score_threshold, MID_QUERY_SCORE_THRESHOLD)
+        else:
+            threshold = self.score_threshold
 
         strong_docs = exact_matches
         if scored_docs and scored_docs[0][1] >= threshold:

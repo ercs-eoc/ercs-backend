@@ -204,3 +204,4 @@ django_settings_module = "main.settings"
 
 [tool.typos.default.extend-words]
 acount = "acount"
+nd = "nd"  # ordinal suffix, e.g. "2nd"
