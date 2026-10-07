@@ -1,4 +1,4 @@
 [submodule "fugit"]
 	path = fugit
 	url = https://github.com/toggle-corp/fugit.git
-	branch = v0.1.6
+	branch = v0.3.0
