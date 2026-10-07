@@ -86,7 +86,7 @@ class PdfExtraction(BaseExtraction):
     # earlier page summaries out of the final document summary once the doc has enough
     # pages (or the page summaries are long enough). Estimate tokens from the prompt's
     # character count (~4 chars/token for English) and reserve headroom for the model's
-    # own output (5-7 paragraphs + short summary + per-topic sections).
+    # own output (up to 7 paragraphs + short summary + per-topic sections).
     DOC_SUMMARY_OUTPUT_TOKEN_BUDGET = 2048
     DOC_SUMMARY_CONTEXT_WINDOW_FLOOR = 8192
     DOC_SUMMARY_CONTEXT_WINDOW_CEILING = 32768
@@ -219,7 +219,7 @@ class PdfExtraction(BaseExtraction):
                 )
                 continue
 
-            if result.get("summary"):
+            if result.get("summary", "").strip():
                 page_summaries.append(result["summary"])
                 DocumentExtraction.objects.create(
                     report=self.report,
@@ -287,10 +287,21 @@ class PdfExtraction(BaseExtraction):
                 DOC_SUMMARY_SCHEMA,
                 context_window=self.estimate_doc_summary_context_window(doc_summary_prompt),
             )
+            doc_summary = "\n\n".join(
+                paragraph.strip() for paragraph in doc_summary_json.get("paragraphs") or [] if paragraph.strip()
+            )
+            if not doc_summary:
+                # The LLM judged the page summaries to have no substantive content
+                # (placeholder/filler/nonsense text), so there is nothing to summarize.
+                logger.warning("No meaningful content to summarize for report_id=%s.", self.report.pk)
+                DocumentExtraction.objects.filter(pk=doc_summary_obj.pk).update(
+                    status=DocumentExtractionStatus.FAILURE,
+                )
+                return
             DocumentExtraction.objects.filter(pk=doc_summary_obj.pk).update(
                 status=DocumentExtractionStatus.SUCCESS,
-                text=doc_summary_json["doc_summary"],
-                embedding=self.llm_embedding_model.embed_query(doc_summary_json["doc_summary"]),
+                text=doc_summary,
+                embedding=self.llm_embedding_model.embed_query(doc_summary),
             )
             self.handle_doc_summary_sections(self.normalize_doc_summary_sections(doc_summary_json))
         except Exception:

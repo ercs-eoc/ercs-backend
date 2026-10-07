@@ -121,8 +121,10 @@ class OllamaHandler(LLMHandler):
 
     @typing.override
     def load_embedding_model(self) -> Embeddings:
+        model_name = settings.LLM_EMBEDDING_MODEL
+        if not model_name:
+            raise ValueError("LLM_EMBEDDING_MODEL is not set (required unless LLM_USE_SENTENCE_TRANSFORMERS=true).")
         try:
-            model_name = settings.LLM_EMBEDDING_MODEL or ""
             # Model names may carry a tag, e.g. "nomic-embed-text:v1.5".
             base_model_name = model_name.split(":")[0]
             query_prefix, document_prefix = EMBEDDING_TASK_PREFIXES.get(base_model_name, ("", ""))

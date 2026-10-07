@@ -74,7 +74,9 @@ DOC_SUMMARY_TOPICS = [
 DOC_SUMMARY_SCHEMA = {
     "type": "object",
     "properties": {
-        "doc_summary": {"type": "string"},
+        # A list (joined into the stored doc summary) rather than one string, so the
+        # model can't run on into a page-by-page dump and paragraph count stays bounded.
+        "paragraphs": {"type": "array", "items": {"type": "string"}, "maxItems": 7},
         "doc_summary_short": {"type": "string"},
         "sections": {
             "type": "array",
@@ -88,7 +90,7 @@ DOC_SUMMARY_SCHEMA = {
             },
         },
     },
-    "required": ["doc_summary", "doc_summary_short", "sections"],
+    "required": ["paragraphs", "doc_summary_short", "sections"],
 }
 
 PAGE_PROMPT = """
@@ -106,6 +108,8 @@ no explanation, no markdown, no backticks:
 
 Summary rules:
 - Be dense and factual - not a vague "this page discusses/presents..." overview.
+  Write about the content itself; never use "The document"/"The page"/"This
+  page" as a sentence subject.
 - Capture every number (stats, %, counts, amounts, units), date/timeframe, and
   named location on the page, exactly as stated - never round, estimate, or
   invent. Never swap an exact figure for a vague quantifier ("over a
@@ -149,8 +153,12 @@ Summary rules:
   planned, or contingent ("would be scaled up if X happens", "planned to"),
   keep that framing in the summary - never state it as something that
   already happened or was actually provided.
-- If the page has no meaningful content (blank, cover, table of contents),
-  say so briefly instead of padding.
+- If the page has no substantive informational content - blank, cover/title
+  only, table of contents, placeholder or filler text (e.g. "lorem ipsum",
+  "no data here", "sample text"), test strings, or gibberish - return
+  "summary": "" and "key_findings": "". Do NOT describe the emptiness
+  (no "this page contains no data"), and NEVER invent content to fill the
+  summary.
 
 Rules:
 - Return ONLY the JSON object.
@@ -162,112 +170,50 @@ Rules:
 
 def get_doc_summary_prompt(page_summaries: list[str]):
     return f"""
-        You are an expert document analyst. You are given per-page summaries
-        of a document. Combine them into one coherent, factual summary:
-        merge info across pages, drop duplicates/repetition, preserve facts,
-        stats, dates and conclusions, surface the main themes, and highlight
-        key findings/recommendations.
+        Combine the per-page summaries below into one factual document summary.
 
-        Factual accuracy (critical):
-        - No hallucination. State only facts, figures, names, and dates
-          explicitly present in the page summaries.
-        - Preserve numbers exactly as given - never round, estimate, infer,
-          extrapolate, or compute a number that isn't explicitly stated.
-          Never downgrade an exact figure into a vague quantifier ("over a
-          million", "nearly all") when a page summary gives a precise one -
-          e.g. write "1,400,000 people (of 3,200,000 doses)", not "over one
-          million people".
-        - If summaries conflict or a fact is ambiguous, omit it rather than
-          guessing or reconciling it with unstated assumptions.
-        - Leave out a topic or "doc_summary_short" entirely rather than
-          fabricate content for it.
-        - Entity precision: when two similar/related entities appear (e.g.
-          the subject country vs. a neighboring one, similarly named orgs),
-          keep every fact tied to the exact entity its source summary
-          attributed it to. Never merge them or let a fact drift from one to
-          the other just because they co-occur.
-        - Funding precision (critical, the most commonly gotten-wrong fact):
-          a funding REQUIREMENT/target (the amount asked for, often broken
-          down by channel, e.g. "CHF 5 million through X, CHF 9 million
-          through Y") is NOT the same fact as the amount actually
-          RECEIVED/raised or a "% funded" figure - keep them as two separate
-          facts even when a page summary mentions both close together.
-          Never phrase a requirement breakdown as if it were funding already
-          received (e.g. do NOT write "the appeal had raised CHF 5 million
-          and CHF 9 million, with a total target of CHF 14 million" if the
-          actual received figure is a separate "13% funded" - state instead
-          that the requirement is CHF 5M+9M (=CHF 14M target) AND, as a
-          distinct fact, that only 13% of it has been funded so far).
-        - Preserve conditionals (critical): if a page summary describes
-          something as conditional, planned, contingent, or hypothetical
-          ("if X occurs, Y would happen", "services would be scaled up if
-          needed", "planned to", "would deploy"), it must stay conditional in
-          "doc_summary" - never flatten it into a statement that Y actually
-          happened or was provided. Do NOT write "ZRCS provided emergency
-          shelter services" when the source says shelter/PSS support would
-          only be scaled up IF the results announcement was delayed or
-          violence escalated - keep the "if/would" framing intact. When
-          unsure whether something is conditional or already actual, treat
-          it as conditional and phrase it that way.
-        - Thoroughness: this is a detailed operational document, not a
-          headline-only one. Preserve granular facts where available - every
-          named location (not just one or two), per-location/per-indicator
-          actual-vs-target figures, funding breakdowns (not just one total),
-          and organizational capacity numbers (staff, volunteers, branches).
-          Don't flatten available specifics into vague generalities.
+        Rules (critical):
+        1. Use ONLY facts stated in the page summaries. No background
+           knowledge, no generic commentary, no plausible filler (e.g.
+           "highlighted the need for early warning systems", "vulnerable groups
+           were disproportionately affected", unnamed "partners", or services
+           not mentioned). Every sentence must be traceable to a page summary.
+        2. If the page summaries have no substantive content (blank, "no data",
+           placeholder/filler/test text, nonsense), return
+           {{"paragraphs": [], "doc_summary_short": "", "sections": []}}.
+        3. Copy numbers, dates, names and locations digit-for-digit - never round,
+           estimate, compute, or turn an exact figure into "over"/"about".
+           Keep every fact tied to the exact entity/location it belongs to.
+        4. Funding: a requirement/target (and its breakdown) is a different
+           fact from the amount received or "% funded". State both separately;
+           never present a requirement as money raised.
+        5. Keep conditional/planned things conditional ("would", "if",
+           "planned to") - never state them as done. If unsure, keep conditional.
+        6. Keep specifics: every named location, per-location/per-indicator
+           figures (actual vs target), funding breakdowns, staff/volunteer/branch
+           counts. Drop duplicates across pages.
+        7. If summaries conflict or a fact is ambiguous, omit it.
 
-        Writing style:
-        - Describe the subject matter directly, not the document itself.
-          Never open "doc_summary", or any paragraph within it, with "This",
-          "The document", "The report", "The presentation", or similar; never
-          use "document"/"report"/"presentation" generically as a sentence
-          subject anywhere (e.g. "The report states..." is forbidden - a
-          proper-noun title like "The 2023 Annual Report of X..." is fine).
-          Start straight in on the topic (e.g. "The disaster response..."
-          not "This document provides an overview of disaster response.").
-          This applies to EVERY sentence, not just the opening one - a
-          violation mid-paragraph (e.g. "...community trust. The document
-          emphasizes the need for...") is just as forbidden as one at the
-          very start. Before finalizing, scan every sentence of "doc_summary"
-          for "document"/"report"/"presentation" used generically and rewrite
-          any hit, wherever in the text it falls.
-        - Informative, objective, concise tone. Don't mention page numbers,
-          sections, or that content was extracted from multiple pages.
+        Style: objective and concise. Write about the subject itself, never
+        about the document (no sentences starting "The document"/"The
+        report"/"This"). Synthesize across pages; don't retell page by page
+        or mention pages.
 
-        Cover the following topics in "doc_summary" wherever the page
-        summaries have relevant material (no headings/labels in the prose,
-        just flow naturally). Check EVERY topic against the page summaries
-        before skipping it - skip only if truly nothing is said about it
-        anywhere; a brief, factual mention beats a silent drop. In an
-        operational/response report, resources_and_funding, timeline,
-        involved_organization, and coordination_and_partnerships almost
-        always have at least some material somewhere in the page summaries,
-        so scan for it specifically rather than defaulting to the topics
-        that happen to dominate any single page:
-        {chr(10).join(f"- {label}: {guidance}" for _, label, guidance in DOC_SUMMARY_TOPICS)}
+        Topics (cover only those the page summaries actually address; the
+        descriptions explain the topic and are NOT content):
+        {chr(10).join(f'- "{slug}": {guidance}' for slug, _, guidance in DOC_SUMMARY_TOPICS)}
 
-        Page Summaries:
+        Return JSON:
+        - "paragraphs": the summary as a list of prose paragraphs, each
+          covering a distinct group of topics in under 150 words, packed with
+          specific figures (counts, amounts, dates, locations) rather than
+          general description. Use 1 paragraph for a short source and up to
+          7 for a long one. Never pad.
+        - "doc_summary_short": 15-20 words on what the source is about. Add
+          a publication year only if one is explicitly stated - never guess.
+        - "sections": [{{"topic": <slug from the list>, "content": <a few
+          factual sentences>}}] only for topics with material.
 
+        Page summaries:
         {chr(10).join(f"Page {i + 1}: {summary}" for i, summary in enumerate(page_summaries))}
-
-        Return a JSON object with:
-        1. "doc_summary": 5-7 paragraphs of flowing prose per the style/topics
-        above, each paragraph covering a distinct cluster of topics (don't
-        write it all as one block). Separate paragraphs with a blank line
-        (two newlines) - the string must contain 4-6 such blank-line breaks.
-        Use as few as 5 if there isn't enough material to substantively cover
-        more - don't pad with vague or repetitive content just to reach 7.
-        2. "doc_summary_short": 15-20 words on what this document is all
-        about, including the publication year if available.
-        3. "sections": an array of {{"topic": ..., "content": ...}} objects,
-        one per topic with relevant info in the page summaries (omit a topic
-        entirely if there's nothing to say). Use the exact topic slug as
-        "topic", and a few factual sentences (not a restatement of the label)
-        as "content":
-        {chr(10).join(f'- "{slug}" ({label})' for slug, label, _ in DOC_SUMMARY_TOPICS)}
-
-        Before finalizing, re-scan the page summaries once more for
-        resources_and_funding, timeline, involved_organization, and
-        coordination_and_partnerships specifically, and add any material
-        found for them to "doc_summary"/"sections" if missing from your draft.
     """
