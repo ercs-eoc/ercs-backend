@@ -77,6 +77,9 @@ env = environ.Env(
     STATIC_ROOT=(str, BASE_DIR / "data/static"),
     # LLM
     LLM_MODEL_NAME=(str, None),
+    # Optional: a separate (text-only) model for the doc-level summary combine step, which
+    # never sees images. Falls back to LLM_MODEL_NAME if unset.
+    LLM_DOC_SUMMARY_MODEL_NAME=(str, None),
     LLM_OLLAMA_BASE_URL=(str, None),
     LLM_EMBEDDING_MODEL=(str, None),
     LLM_USE_OPENROUTER=(bool, False),
@@ -321,6 +324,7 @@ CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = False
 
 # LLM
 LLM_MODEL_NAME = env("LLM_MODEL_NAME")
+LLM_DOC_SUMMARY_MODEL_NAME = env("LLM_DOC_SUMMARY_MODEL_NAME") or LLM_MODEL_NAME
 LLM_OLLAMA_BASE_URL = env("LLM_OLLAMA_BASE_URL")
 LLM_EMBEDDING_MODEL = env("LLM_EMBEDDING_MODEL")
 # Chat completions can be switched to OpenRouter; OpenRouter has no embeddings

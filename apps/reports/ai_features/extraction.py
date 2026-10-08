@@ -2,17 +2,19 @@ import base64
 import io
 import json
 import logging
+import math
 import time
 from dataclasses import dataclass, field
 from typing import Any
 
 import fitz  # pyright: ignore[reportMissingTypeStubs]
+from django.conf import settings
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models import BaseChatModel
 from PIL import Image
 
 from apps.reports.ai_features.llms import LLMHandler, get_chat_llm_handler, get_embedding_llm_handler
-from apps.reports.ai_features.prompts import DOC_SUMMARY_SCHEMA, PAGE_SCHEMA, get_doc_summary_prompt
+from apps.reports.ai_features.prompts import DOC_SUMMARY_SCHEMA, DOC_SUMMARY_TOPICS, PAGE_SCHEMA, get_doc_summary_prompt
 from apps.reports.models import DocumentExtraction, DocumentExtractionStatus, Report
 
 logger = logging.getLogger(__name__)
@@ -24,12 +26,18 @@ class BaseExtraction:
 
     llm_handler: LLMHandler = field(init=False)
     llm_chat_model: BaseChatModel = field(init=False)
+    # Text-only model for the doc-level summary combine step (never sees images), which can
+    # be a different, non-vision model from LLM_MODEL_NAME via LLM_DOC_SUMMARY_MODEL_NAME.
+    doc_summary_chat_model: BaseChatModel = field(init=False)
     llm_embedding_model: Embeddings = field(init=False)
 
     def __post_init__(self):
         try:
             self.llm_handler = get_chat_llm_handler()
             self.llm_chat_model = self.llm_handler.load_chat_model()
+            self.doc_summary_chat_model = self.llm_handler.load_chat_model(
+                model_name=settings.LLM_DOC_SUMMARY_MODEL_NAME,
+            )
             self.llm_embedding_model = get_embedding_llm_handler().load_embedding_model()
         except Exception as e:
             raise e
@@ -73,6 +81,30 @@ class PdfExtraction(BaseExtraction):
     MAX_PAGE_ATTEMPTS = 3
     PAGE_RETRY_DELAY_SECONDS = 3
 
+    # Doc-summary context window sizing. The prompt concatenates every page's summary,
+    # so its input size scales with page count - a fixed window silently truncates
+    # earlier page summaries out of the final document summary once the doc has enough
+    # pages (or the page summaries are long enough). Estimate tokens from the prompt's
+    # character count (~4 chars/token for English) and reserve headroom for the model's
+    # own output (up to 7 paragraphs + short summary + per-topic sections).
+    DOC_SUMMARY_OUTPUT_TOKEN_BUDGET = 2048
+    DOC_SUMMARY_CONTEXT_WINDOW_FLOOR = 8192
+    DOC_SUMMARY_CONTEXT_WINDOW_CEILING = 32768
+    CHARS_PER_TOKEN_ESTIMATE = 4
+
+    @classmethod
+    def estimate_doc_summary_context_window(cls, prompt: str) -> int:
+        """Size num_ctx for the doc-summary call from the actual prompt length.
+
+        Rounds up to the nearest 1024 (a clean KV-cache size for Ollama) and clamps
+        to a sane floor/ceiling so pathologically small or huge documents don't
+        under- or over-allocate.
+        """
+        input_tokens = math.ceil(len(prompt) / cls.CHARS_PER_TOKEN_ESTIMATE)
+        required_tokens = input_tokens + cls.DOC_SUMMARY_OUTPUT_TOKEN_BUDGET
+        rounded = math.ceil(required_tokens / 1024) * 1024
+        return max(cls.DOC_SUMMARY_CONTEXT_WINDOW_FLOOR, min(rounded, cls.DOC_SUMMARY_CONTEXT_WINDOW_CEILING))
+
     def img_to_base64(self, data: fitz.Pixmap) -> str:
         img_bytes = data.tobytes("png")
 
@@ -108,6 +140,52 @@ class PdfExtraction(BaseExtraction):
         logger.error("Page %s extraction failed after %s attempts", page_idx + 1, self.MAX_PAGE_ATTEMPTS)
         return None
 
+    def normalize_doc_summary_sections(self, doc_summary_json: dict[str, Any]) -> list[tuple[str, str, str]]:
+        """Validate/label the LLM's topical sections, with the short summary as one of them."""
+        topic_labels = {slug: label for slug, label, _ in DOC_SUMMARY_TOPICS}
+        entries: list[tuple[str, str, str]] = []
+
+        doc_summary_short = doc_summary_json.get("doc_summary_short")
+        if doc_summary_short and doc_summary_short.strip():
+            entries.append(("doc_summary_short", "Document Summary Short", doc_summary_short))
+
+        for section in doc_summary_json.get("sections") or []:
+            slug = section.get("topic")
+            content = section.get("content")
+            if not slug or not content or not content.strip() or slug not in topic_labels:
+                continue
+            entries.append((slug, topic_labels[slug], content))
+
+        return entries
+
+    def handle_doc_summary_sections(self, entries: list[tuple[str, str, str]]):
+        """Store all topical sections of the doc summary (and its short summary) as one chunk.
+
+        Each section keeps its own embedding in `section_embeddings`, so a query can
+        match a single topic (e.g. "impacts recorded") without diluting the signal
+        against unrelated content from other topics, while still living in a single
+        row per document rather than one row per topic.
+        """
+        if not entries:
+            return
+        section_embeddings = [
+            {
+                "topic": slug,
+                "label": label,
+                "content": content,
+                "embedding": self.llm_embedding_model.embed_query(content),
+            }
+            for slug, label, content in entries
+        ]
+        DocumentExtraction.objects.create(
+            report=self.report,
+            status=DocumentExtractionStatus.SUCCESS,
+            text="\n".join(f"{label}: {content}" for _, label, content in entries),
+            page_number=None,
+            chunk_type=DocumentExtraction.ExtractionType.DOCUMENT_SUMMARY_SECTION,
+            section_embeddings=section_embeddings,
+        )
+
     def pdf_to_images(self, zoom: float = 1.1):
         page_summaries = []
         doc = fitz.open(stream=self.data, filetype="pdf")
@@ -141,7 +219,7 @@ class PdfExtraction(BaseExtraction):
                 )
                 continue
 
-            if result.get("summary"):
+            if result.get("summary", "").strip():
                 page_summaries.append(result["summary"])
                 DocumentExtraction.objects.create(
                     report=self.report,
@@ -200,31 +278,32 @@ class PdfExtraction(BaseExtraction):
 
         doc_summary_prompt = get_doc_summary_prompt(page_summaries=page_summaries)
         try:
-            # This prompt concatenates every page's summary, so its input size scales with
-            # page count. Override back up to the original context window rather than the
-            # smaller per-page default, since a lower window here can silently truncate
-            # earlier page summaries out of the final document summary. (Ollama-only; ignored
-            # by handlers whose backend sizes context from the model itself.)
+            # Size the context window to the actual prompt rather than a fixed value,
+            # since it concatenates every page's summary (see estimate_doc_summary_context_window).
+            # (Ollama-only; ignored by handlers whose backend sizes context from the model itself.)
             doc_summary_json = self.llm_handler.generate_structured(
-                self.llm_chat_model,
+                self.doc_summary_chat_model,
                 doc_summary_prompt,
                 DOC_SUMMARY_SCHEMA,
-                context_window=8192,
+                context_window=self.estimate_doc_summary_context_window(doc_summary_prompt),
             )
+            doc_summary = "\n\n".join(
+                paragraph.strip() for paragraph in doc_summary_json.get("paragraphs") or [] if paragraph.strip()
+            )
+            if not doc_summary:
+                # The LLM judged the page summaries to have no substantive content
+                # (placeholder/filler/nonsense text), so there is nothing to summarize.
+                logger.warning("No meaningful content to summarize for report_id=%s.", self.report.pk)
+                DocumentExtraction.objects.filter(pk=doc_summary_obj.pk).update(
+                    status=DocumentExtractionStatus.FAILURE,
+                )
+                return
             DocumentExtraction.objects.filter(pk=doc_summary_obj.pk).update(
                 status=DocumentExtractionStatus.SUCCESS,
-                text=doc_summary_json["doc_summary"],
-                embedding=self.llm_embedding_model.embed_query(doc_summary_json["doc_summary"]),
+                text=doc_summary,
+                embedding=self.llm_embedding_model.embed_query(doc_summary),
             )
-            if doc_summary_json.get("doc_summary_short"):
-                DocumentExtraction.objects.create(
-                    report=self.report,
-                    status=DocumentExtractionStatus.SUCCESS,
-                    text=doc_summary_json["doc_summary_short"],
-                    page_number=None,
-                    chunk_type=DocumentExtraction.ExtractionType.DOCUMENT_SUMMARY_SHORT,
-                    embedding=self.llm_embedding_model.embed_query(doc_summary_json["doc_summary_short"]),
-                )
+            self.handle_doc_summary_sections(self.normalize_doc_summary_sections(doc_summary_json))
         except Exception:
             logger.warning("Doc summary generation failed or returned malformed output.", exc_info=True)
             DocumentExtraction.objects.filter(pk=doc_summary_obj.pk).update(

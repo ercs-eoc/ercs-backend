@@ -494,6 +494,7 @@ enum ExtractionType {
   TITLE
   DESCRIPTION
   DOCUMENT_SUMMARY_SHORT
+  DOCUMENT_SUMMARY_SECTION
 }
 
 type FieldStats {

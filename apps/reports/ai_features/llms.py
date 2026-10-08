@@ -54,7 +54,10 @@ class LLMHandler:
             ],
         )
 
-    def load_chat_model(self) -> BaseChatModel:
+    def load_chat_model(self, model_name: str | None = None) -> BaseChatModel:
+        """Load the chat model. `model_name` overrides the handler's configured default
+        (used to run a different model for the text-only doc-summary combine step).
+        """
         raise NotImplementedError
 
     def load_embedding_model(self) -> Embeddings:
@@ -87,16 +90,23 @@ class OllamaHandler(LLMHandler):
     """LLM Handler using Ollama."""
 
     @typing.override
-    def load_chat_model(self) -> BaseChatModel:
+    def load_chat_model(self, model_name: str | None = None) -> BaseChatModel:
         try:
             return ChatOllama(
-                model=settings.LLM_MODEL_NAME,
+                model=model_name or settings.LLM_MODEL_NAME,
                 base_url=settings.LLM_OLLAMA_BASE_URL,
                 temperature=self.temperature,
-                # Sized for a single page (prompt + one page's vision tokens + JSON output).
-                # The multi-page document summary call needs a larger window and overrides
-                # this via `options={"num_ctx": ...}` at call time.
-                num_ctx=4096,
+                # Explicitly disable "thinking" mode. Reasoning-capable models (e.g. the
+                # qwen3 family) can otherwise burn the entire context window on a hidden
+                # chain-of-thought before ever emitting the requested JSON, returning an
+                # empty response. No effect on non-reasoning models (e.g. qwen2.5vl).
+                reasoning=False,
+                # Sized for a single page (prompt + one page's vision tokens + JSON output),
+                # with headroom for pages that combine long extracted_text with large tables
+                # and the up-to-500-word summary. The multi-page document summary call needs
+                # a larger, size-dependent window and overrides this via
+                # `options={"num_ctx": ...}` at call time.
+                num_ctx=6144,
                 client_kwargs={
                     "timeout": httpx.Timeout(
                         connect=30.0,
@@ -111,8 +121,10 @@ class OllamaHandler(LLMHandler):
 
     @typing.override
     def load_embedding_model(self) -> Embeddings:
+        model_name = settings.LLM_EMBEDDING_MODEL
+        if not model_name:
+            raise ValueError("LLM_EMBEDDING_MODEL is not set (required unless LLM_USE_SENTENCE_TRANSFORMERS=true).")
         try:
-            model_name = settings.LLM_EMBEDDING_MODEL or ""
             # Model names may carry a tag, e.g. "nomic-embed-text:v1.5".
             base_model_name = model_name.split(":")[0]
             query_prefix, document_prefix = EMBEDDING_TASK_PREFIXES.get(base_model_name, ("", ""))
@@ -151,11 +163,11 @@ class OpenRouterHandler(LLMHandler):
     reasoning: dict[str, Any] | None = None
 
     @typing.override
-    def load_chat_model(self) -> BaseChatModel:
+    def load_chat_model(self, model_name: str | None = None) -> BaseChatModel:
         try:
             reasoning_kwargs: dict[str, Any] = {"reasoning": self.reasoning} if self.reasoning else {}
             return ChatOpenRouter(
-                model=settings.LLM_MODEL_NAME or self.model_name,
+                model=model_name or settings.LLM_MODEL_NAME or self.model_name,
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
                 api_key=settings.OPENROUTER_API_KEY,
