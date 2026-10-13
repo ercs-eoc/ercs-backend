@@ -54,7 +54,10 @@ class LLMHandler:
             ],
         )
 
-    def load_chat_model(self) -> BaseChatModel:
+    def load_chat_model(self, model_name: str | None = None) -> BaseChatModel:
+        """Load the chat model. `model_name` overrides the handler's configured default
+        (used to run a different model for the text-only doc-summary combine step).
+        """
         raise NotImplementedError
 
     def load_embedding_model(self) -> Embeddings:
@@ -66,8 +69,13 @@ class LLMHandler:
         messages: LanguageModelInput,
         schema: dict[str, Any],
         context_window: int | None = None,
+        is_retry: bool = False,
     ) -> dict[str, Any]:
-        """Invoke the chat model and return its response parsed against `schema`."""
+        """Invoke the chat model and return its response parsed against `schema`.
+
+        `is_retry` marks a repeat of a call that already failed; handlers may vary
+        sampling so the retry isn't an identical replay of the failed generation.
+        """
         raise NotImplementedError
 
 
@@ -86,17 +94,27 @@ class OpenAIHandler(LLMHandler):
 class OllamaHandler(LLMHandler):
     """LLM Handler using Ollama."""
 
+    RETRY_REPEAT_PENALTY = 1.15
+    RETRY_TEMPERATURE = 0.2
+
     @typing.override
-    def load_chat_model(self) -> BaseChatModel:
+    def load_chat_model(self, model_name: str | None = None) -> BaseChatModel:
         try:
             return ChatOllama(
-                model=settings.LLM_MODEL_NAME,
+                model=model_name or settings.LLM_MODEL_NAME,
                 base_url=settings.LLM_OLLAMA_BASE_URL,
                 temperature=self.temperature,
-                # Sized for a single page (prompt + one page's vision tokens + JSON output).
-                # The multi-page document summary call needs a larger window and overrides
-                # this via `options={"num_ctx": ...}` at call time.
-                num_ctx=4096,
+                # Explicitly disable "thinking" mode. Reasoning-capable models (e.g. the
+                # qwen3 family) can otherwise burn the entire context window on a hidden
+                # chain-of-thought before ever emitting the requested JSON, returning an
+                # empty response. No effect on non-reasoning models (e.g. qwen2.5vl).
+                reasoning=False,
+                # Sized for a single page (prompt + one page's vision tokens + JSON output),
+                # with headroom for pages that combine long extracted_text with large tables
+                # and the up-to-500-word summary. The multi-page document summary call needs
+                # a larger, size-dependent window and overrides this per call
+                # (see generate_structured).
+                num_ctx=6144,
                 client_kwargs={
                     "timeout": httpx.Timeout(
                         connect=30.0,
@@ -111,8 +129,10 @@ class OllamaHandler(LLMHandler):
 
     @typing.override
     def load_embedding_model(self) -> Embeddings:
+        model_name = settings.LLM_EMBEDDING_MODEL
+        if not model_name:
+            raise ValueError("LLM_EMBEDDING_MODEL is not set (required unless LLM_USE_SENTENCE_TRANSFORMERS=true).")
         try:
-            model_name = settings.LLM_EMBEDDING_MODEL or ""
             # Model names may carry a tag, e.g. "nomic-embed-text:v1.5".
             base_model_name = model_name.split(":")[0]
             query_prefix, document_prefix = EMBEDDING_TASK_PREFIXES.get(base_model_name, ("", ""))
@@ -132,9 +152,23 @@ class OllamaHandler(LLMHandler):
         messages: LanguageModelInput,
         schema: dict[str, Any],
         context_window: int | None = None,
+        is_retry: bool = False,
     ) -> dict[str, Any]:
-        invoke_kwargs: dict[str, Any] = {"options": {"num_ctx": context_window}} if context_window else {}
-        response = chat_model.invoke(messages, format=schema, **invoke_kwargs)
+        # Override via a model copy rather than `invoke(..., options=...)`: ChatOllama
+        # sends an explicit `options` dict as-is, *replacing* the model's own options
+        # (temperature, num_ctx, ...) instead of merging into them.
+        overrides: dict[str, Any] = {}
+        if context_window:
+            overrides["num_ctx"] = context_window
+        if is_retry:
+            # At temperature 0 a failed generation (e.g. a "\t\t\t..." loop while
+            # transcribing a table, aborted by Ollama's token repeat limit) replays
+            # identically on every retry. Penalize repeats and add slight randomness.
+            overrides["repeat_penalty"] = self.RETRY_REPEAT_PENALTY
+            overrides["temperature"] = self.RETRY_TEMPERATURE
+        if overrides:
+            chat_model = chat_model.model_copy(update=overrides)
+        response = chat_model.invoke(messages, format=schema)
         if not isinstance(response.content, str):
             raise TypeError("Response content is not a string")
         return json.loads(response.content)
@@ -151,11 +185,11 @@ class OpenRouterHandler(LLMHandler):
     reasoning: dict[str, Any] | None = None
 
     @typing.override
-    def load_chat_model(self) -> BaseChatModel:
+    def load_chat_model(self, model_name: str | None = None) -> BaseChatModel:
         try:
             reasoning_kwargs: dict[str, Any] = {"reasoning": self.reasoning} if self.reasoning else {}
             return ChatOpenRouter(
-                model=settings.LLM_MODEL_NAME or self.model_name,
+                model=model_name or settings.LLM_MODEL_NAME or self.model_name,
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
                 api_key=settings.OPENROUTER_API_KEY,
@@ -171,6 +205,7 @@ class OpenRouterHandler(LLMHandler):
         messages: LanguageModelInput,
         schema: dict[str, Any],
         context_window: int | None = None,
+        is_retry: bool = False,
     ) -> dict[str, Any]:
         # context_window has no OpenRouter equivalent to Ollama's num_ctx override;
         # the model's own context window applies.
