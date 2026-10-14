@@ -81,6 +81,16 @@ app:
           - "1"
           - "--max-tasks-per-child"
           - "10"
+      # Long-running document extraction (page-by-page LLM calls, up to 10h).
+      report-llm:
+        enabled: true
+        celeryArgs:
+          - "-Q"
+          - "report-llm"
+          - "--concurrency"
+          - "1"
+          - "--max-tasks-per-child"
+          - "10"
     addons:
       beat:
         enabled: true

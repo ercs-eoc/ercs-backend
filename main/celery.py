@@ -18,6 +18,11 @@ setup_worker_heartbeat(app)
 app.config_from_object("django.conf:settings", namespace="CELERY")
 
 app.conf.task_default_queue = "default"
+# Document extraction runs for hours (page-by-page LLM calls), so it gets its own
+# queue/worker instead of blocking every other task on the default queue.
+app.conf.task_routes = {
+    "apps.reports.tasks.task.handle_documents": {"queue": "report-llm"},
+}
 
 # Static beat schedule (no django-celery-beat); defined in main/cronjobs.py.
 app.conf.beat_schedule = BEAT_SCHEDULES

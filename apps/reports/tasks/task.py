@@ -1,15 +1,21 @@
 import logging
 
 from celery import shared_task
+from celery.exceptions import SoftTimeLimitExceeded
 from django.core.files.storage import default_storage
 
 from apps.reports.ai_features.extraction import HeaderExtraction, PdfExtraction
-from apps.reports.models import DocumentExtraction, Report, ReportContentType
+from apps.reports.models import DocumentExtraction, DocumentExtractionStatus, Report, ReportContentType
 
 logger = logging.getLogger(__name__)
 
+# Page-by-page LLM extraction + doc summary of long files can take hours on Ollama,
+# far beyond the global CELERY_TASK_*_TIME_LIMIT.
+DOCUMENT_EXTRACTION_SOFT_TIME_LIMIT = 10 * 60 * 60
+DOCUMENT_EXTRACTION_TIME_LIMIT = DOCUMENT_EXTRACTION_SOFT_TIME_LIMIT + 5 * 60
 
-@shared_task
+
+@shared_task(soft_time_limit=DOCUMENT_EXTRACTION_SOFT_TIME_LIMIT, time_limit=DOCUMENT_EXTRACTION_TIME_LIMIT)
 def handle_documents(report_id: int, report_type: ReportContentType) -> None:
     report = Report.objects.filter(pk=report_id).first()
 
@@ -33,7 +39,15 @@ def handle_documents(report_id: int, report_type: ReportContentType) -> None:
             report=report,
             data=pdf_bytes,
         )
-        ext.pdf_to_images()
+        try:
+            ext.pdf_to_images()
+        except SoftTimeLimitExceeded:
+            # Don't leave the doc summary stuck in PENDING when the task runs out of time.
+            logger.error("Report with id %s: extraction exceeded the task time limit", report_id)
+            DocumentExtraction.objects.filter(report=report, status=DocumentExtractionStatus.PENDING).update(
+                status=DocumentExtractionStatus.FAILURE,
+            )
+            raise
     elif report_type == ReportContentType.IFRAME:
         ext = HeaderExtraction(report=report)
         ext.handle_meta_info()

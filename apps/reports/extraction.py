@@ -23,4 +23,4 @@ async def trigger_document_extraction(report: Report) -> None:
         "Triggering document extraction for report_id=%s",
         str(report.pk),
     )
-    handle_documents.apply_async(args=(report.pk, report.content_type))  # pyright: ignore[reportFunctionMemberAccess]
+    handle_documents.apply_async(args=(report.pk, report.content_type))  # pyright: ignore[reportCallIssue]

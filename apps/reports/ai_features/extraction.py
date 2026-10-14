@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import fitz  # pyright: ignore[reportMissingTypeStubs]
+from celery.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models import BaseChatModel
@@ -278,6 +279,9 @@ class PdfExtraction(BaseExtraction):
                 context_window = next(larger_context_windows, context_window)
                 if attempt < self.MAX_PAGE_ATTEMPTS:
                     time.sleep(self.PAGE_RETRY_DELAY_SECONDS)
+            except SoftTimeLimitExceeded:
+                # Task is out of time: don't retry/continue as if this page just failed.
+                raise
             except Exception:
                 logger.warning(
                     "Page %s extraction attempt %s/%s failed",
@@ -380,6 +384,8 @@ class PdfExtraction(BaseExtraction):
                     context_window=context_window,
                     is_retry=attempt > 1,
                 )
+            except SoftTimeLimitExceeded:
+                raise
             except Exception:
                 if attempt == self.MAX_PAGE_ATTEMPTS and best is None:
                     raise
@@ -603,6 +609,11 @@ class PdfExtraction(BaseExtraction):
                 embedding=self.llm_embedding_model.embed_query(doc_summary),
             )
             self.handle_doc_summary_sections(self.normalize_doc_summary_sections(doc_summary_json))
+        except SoftTimeLimitExceeded:
+            DocumentExtraction.objects.filter(pk=doc_summary_obj.pk).update(
+                status=DocumentExtractionStatus.FAILURE,
+            )
+            raise
         except Exception:
             logger.warning("Doc summary generation failed or returned malformed output.", exc_info=True)
             DocumentExtraction.objects.filter(pk=doc_summary_obj.pk).update(
