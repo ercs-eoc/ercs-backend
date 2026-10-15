@@ -330,6 +330,100 @@ spec:
             - mountPath: /var/run/celery
               name: celery-heartbeat
 
+
+---
+# Source: ercs-backend-helm/charts/app/templates/worker/deployment.yaml
+# Queue: report-llm
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: release-name-ercs-worker-report-llm
+  annotations:
+    argocd.argoproj.io/sync-wave: "30"
+    reloader.stakater.com/auto: "true"
+  labels:
+    app: release-name-ercs
+    component: worker
+    queue: report-llm
+    environment: ALPHA
+    release: release-name
+spec:
+  revisionHistoryLimit: 1
+  selector:
+    matchLabels:
+      app: release-name-ercs
+      component: worker
+      queue: report-llm
+  template:
+    metadata:
+      annotations:
+        checksum/secret: 88fb2eb54fc8fca9dee7d1b4311e3ef332fa815e9c0237507067ab43e438b5ee
+        checksum/configmap: e065969f0b9711d576cc1f3dc0c8a8e948b85363d6279044098f6b6730642f7c
+      labels:
+        app: release-name-ercs
+        component: worker
+        queue: report-llm
+    spec:
+      volumes:
+        - emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+          name: celery-heartbeat
+      containers:
+        - name: worker
+          command:
+            - celery
+            - -A
+            - main
+            - worker
+            - -l
+            - INFO
+            - -Q
+            - report-llm
+            - --concurrency
+            - "1"
+            - --max-tasks-per-child
+            - "10"
+          image: "local.example.com/toggle-corp/ercs-backend:develop.xxxxxxxx"
+          imagePullPolicy: IfNotPresent
+          livenessProbe:
+            exec:
+              command:
+              - banjo-celery-probe
+            failureThreshold: 6
+            periodSeconds: 20
+            timeoutSeconds: 5
+          startupProbe:
+            exec:
+              command:
+              - banjo-celery-probe
+            failureThreshold: 30
+            periodSeconds: 5
+          resources:
+            limits:
+              memory: 1Gi
+            requests:
+              cpu: "0.1"
+              memory: 0.5Gi
+          envFrom:
+            - secretRef:
+                name: release-name-ercs-secret
+            - configMapRef:
+                name: release-name-ercs-env-name
+          env:
+            - name: APP_TYPE
+              value: "worker"
+            - name: CACHE_REDIS_URL
+              value: redis://ercs-dragonfly:6379/1
+            - name: CELERY_REDIS_URL
+              value: redis://ercs-dragonfly:6379/0
+            
+            - name: BANJO_CELERY_HEARTBEAT_FILE
+              value: "/var/run/celery/worker_heartbeat"
+          volumeMounts:
+            - mountPath: /var/run/celery
+              name: celery-heartbeat
+
 ---
 # Source: ercs-backend-helm/charts/app/templates/hooks/job.yaml
 # Hook: collect-static

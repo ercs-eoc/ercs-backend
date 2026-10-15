@@ -79,10 +79,15 @@ services:
 
   worker:
     <<: *base_worker_setup
-    command: ["/code/misc/dev/run_worker.sh"]
+    command: ["/code/misc/dev/run_worker.sh", "--queues", "default"]
     environment:
       <<: *base_server_environments
       APP_TYPE: "WORKER"
+
+  # Long-running document extraction (LLM), kept off the default worker.
+  worker-report-llm:
+    <<: *base_worker_setup
+    command: ["/code/misc/dev/run_worker.sh", "--queues", "report-llm"]
 
 volumes:
   postgres_data17:

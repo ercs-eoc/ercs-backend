@@ -4,6 +4,6 @@
 
 celery -A main worker \
     -l INFO \
-    -Q default \
+    -Q "${CELERY_QUEUES:-default,report-llm}" \
     --concurrency 1 \
     --max-tasks-per-child 4

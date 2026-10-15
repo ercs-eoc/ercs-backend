@@ -329,6 +329,8 @@ enum DocumentExtractionStatus {
   IN_PROGRESS
   SUCCESS
   FAILURE
+  PARTIAL_SUCCESS
+  TIMED_OUT
 }
 
 """
@@ -1340,11 +1342,11 @@ input ReportCreateInput {
   iframeUrl: String
   visibility: ReportVisibility! = PUBLIC
   reportType: ReportTypeEnum! = REPORT
-  thematicArea: ID
+  thematicArea: ID!
   region: ID
   disasterType: String
   owner: String
-  publishedAt: String
+  publishedAt: String!
 }
 
 """

@@ -1,4 +1,5 @@
 import base64
+import datetime
 import io
 import json
 import logging
@@ -9,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import fitz  # pyright: ignore[reportMissingTypeStubs]
+from celery.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models import BaseChatModel
@@ -179,8 +181,20 @@ class BaseExtraction:
 
 
 @dataclass
+class PdfExtractionStats:
+    """Run metrics collected by PdfExtraction.pdf_to_images (stored on DocumentExtractionRun)."""
+
+    page_count: int = 0
+    failed_page_count: int = 0
+    page_extraction_duration: datetime.timedelta | None = None
+    doc_summary_duration: datetime.timedelta | None = None
+    doc_summary_generated: bool = False
+
+
+@dataclass
 class PdfExtraction(BaseExtraction):
     data: bytes
+    stats: PdfExtractionStats = field(default_factory=PdfExtractionStats)
 
     # Qwen2.5-VL uses a native dynamic-resolution vision encoder, so the number of
     # vision tokens (and Ollama's memory/compute use) scales with input pixel count.
@@ -278,6 +292,9 @@ class PdfExtraction(BaseExtraction):
                 context_window = next(larger_context_windows, context_window)
                 if attempt < self.MAX_PAGE_ATTEMPTS:
                     time.sleep(self.PAGE_RETRY_DELAY_SECONDS)
+            except SoftTimeLimitExceeded:
+                # Task is out of time: don't retry/continue as if this page just failed.
+                raise
             except Exception:
                 logger.warning(
                     "Page %s extraction attempt %s/%s failed",
@@ -380,6 +397,8 @@ class PdfExtraction(BaseExtraction):
                     context_window=context_window,
                     is_retry=attempt > 1,
                 )
+            except SoftTimeLimitExceeded:
+                raise
             except Exception:
                 if attempt == self.MAX_PAGE_ATTEMPTS and best is None:
                     raise
@@ -504,6 +523,8 @@ class PdfExtraction(BaseExtraction):
             embedding=None,
         )
 
+        self.stats.page_count = len(doc)
+        pages_started = time.monotonic()
         for page_idx in range(len(doc)):
             logger.info("Processing Page %s", page_idx + 1)
             page = doc[page_idx]
@@ -513,6 +534,7 @@ class PdfExtraction(BaseExtraction):
 
             result = self.extract_page(page_idx=page_idx, img_b64=img_b64)
             if result is None:
+                self.stats.failed_page_count += 1
                 DocumentExtraction.objects.create(
                     report=self.report,
                     status=DocumentExtractionStatus.FAILURE,
@@ -574,6 +596,7 @@ class PdfExtraction(BaseExtraction):
                     chunk_type=DocumentExtraction.ExtractionType.CHART,
                     embedding=self.llm_embedding_model.embed_query(json.dumps(result["charts"])),
                 )
+        self.stats.page_extraction_duration = datetime.timedelta(seconds=time.monotonic() - pages_started)
 
         if not page_summaries:
             # No page produced a summary (all pages failed or returned no content),
@@ -584,6 +607,7 @@ class PdfExtraction(BaseExtraction):
             )
             return
 
+        summary_started = time.monotonic()
         try:
             doc_summary_json = self.generate_doc_summary(page_summaries)
             doc_summary = "\n\n".join(
@@ -603,11 +627,19 @@ class PdfExtraction(BaseExtraction):
                 embedding=self.llm_embedding_model.embed_query(doc_summary),
             )
             self.handle_doc_summary_sections(self.normalize_doc_summary_sections(doc_summary_json))
+            self.stats.doc_summary_generated = True
+        except SoftTimeLimitExceeded:
+            DocumentExtraction.objects.filter(pk=doc_summary_obj.pk).update(
+                status=DocumentExtractionStatus.FAILURE,
+            )
+            raise
         except Exception:
             logger.warning("Doc summary generation failed or returned malformed output.", exc_info=True)
             DocumentExtraction.objects.filter(pk=doc_summary_obj.pk).update(
                 status=DocumentExtractionStatus.FAILURE,
             )
+        finally:
+            self.stats.doc_summary_duration = datetime.timedelta(seconds=time.monotonic() - summary_started)
 
 
 @dataclass

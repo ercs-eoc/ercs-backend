@@ -1,3 +1,4 @@
+import datetime
 import typing
 
 from django.core.exceptions import ValidationError
@@ -40,6 +41,10 @@ class DocumentExtractionStatus(models.IntegerChoices):
     IN_PROGRESS = 20, "In Progress"
     SUCCESS = 30, "Success"
     FAILURE = 40, "Failure"
+    # Run-level only (DocumentExtractionRun): task finished, but some pages or the doc summary failed.
+    PARTIAL_SUCCESS = 50, "Partial Success"
+    # Run-level only (DocumentExtractionRun): task hit its soft time limit.
+    TIMED_OUT = 60, "Timed Out"
 
 
 class LinkType(models.IntegerChoices):
@@ -206,6 +211,66 @@ class DocumentExtraction(BaseModel):
     @typing.override
     def __str__(self) -> str:
         return f"Extraction for {self.report} ({self.get_status_display()})"  # type: ignore[reportAttributeAccessIssue]
+
+
+class DocumentExtractionRun(BaseModel):
+    """One execution of the document extraction celery task for a Report.
+
+    Kept separate from DocumentExtraction (the extracted chunks, wiped on every
+    re-extraction) so run history, timings and failures survive re-runs.
+    ``created_at`` is when the run was queued.
+    """
+
+    Status = DocumentExtractionStatus  # convenience alias
+
+    class Trigger(models.IntegerChoices):
+        REPORT_CREATED = 10, "Report Created"
+        FILE_REPLACED = 20, "File Replaced"
+
+    report = models.ForeignKey(
+        Report,
+        on_delete=models.CASCADE,
+        related_name="extraction_runs",
+    )
+    trigger: int | None = IntegerChoicesField(choices_enum=Trigger, null=True, blank=True)  # type: ignore[reportAssignmentType]
+    celery_task_id = models.CharField[str, str](max_length=255, blank=True, default="", db_index=True)
+    status: int = IntegerChoicesField(choices_enum=DocumentExtractionStatus, default=DocumentExtractionStatus.PENDING)  # type: ignore[reportAssignmentType]
+
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    page_extraction_duration = models.DurationField(null=True, blank=True)
+    doc_summary_duration = models.DurationField(null=True, blank=True)
+
+    page_count = models.PositiveIntegerField(null=True, blank=True)
+    failed_page_count = models.PositiveIntegerField(null=True, blank=True)
+    doc_summary_generated = models.BooleanField(null=True, blank=True)
+
+    llm_model = models.CharField[str, str](max_length=255, blank=True, default="")
+    doc_summary_model = models.CharField[str, str](max_length=255, blank=True, default="")
+    embedding_model = models.CharField[str, str](max_length=255, blank=True, default="")
+
+    error_message = models.TextField[str, str](blank=True, default="")
+
+    class Meta:  # type: ignore[reportIncompatibleVariableOverride]
+        verbose_name = "Document Extraction Run"
+        verbose_name_plural = "Document Extraction Runs"
+        ordering = ["-created_at"]
+
+    @typing.override
+    def __str__(self) -> str:
+        return f"Extraction run for {self.report} ({self.get_status_display()})"  # type: ignore[reportAttributeAccessIssue]
+
+    @property
+    def queue_wait(self) -> datetime.timedelta | None:
+        if self.started_at is None:
+            return None
+        return self.started_at - self.created_at
+
+    @property
+    def duration(self) -> datetime.timedelta | None:
+        if self.started_at is None or self.finished_at is None:
+            return None
+        return self.finished_at - self.started_at
 
 
 class Link(BaseModel):
