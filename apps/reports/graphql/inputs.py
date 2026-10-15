@@ -30,11 +30,11 @@ class ReportCreateInput:
     iframe_url: str | None = strawberry.UNSET
     visibility: ReportVisibility = ReportVisibility.PUBLIC
     report_type: ReportType = ReportType.REPORT
-    thematic_area: strawberry.ID | None = strawberry.UNSET
+    thematic_area: strawberry.ID
     region: strawberry.ID | None = strawberry.UNSET
     disaster_type: str | None = strawberry.UNSET
     owner: str | None = strawberry.UNSET
-    published_at: str | None = strawberry.UNSET
+    published_at: str
 
 
 @strawberry.input

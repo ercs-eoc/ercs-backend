@@ -2,13 +2,15 @@ import typing
 from unittest.mock import patch
 
 from apps.reports.factories import LinkFactory, ReportFactory, ThematicAreaFactory
-from apps.reports.models import Link, Report, ThematicArea
+from apps.reports.models import DocumentExtractionRun, Link, Report, ThematicArea
 from apps.users.factories import UserFactory
 from apps.users.models import User
 from main.tests import TestCase
 
 
 class TestReportMutations(TestCase):
+    PUBLISHED_AT = "2026-01-15T00:00:00+00:00"
+
     class Mutation:
         DELETE_REPORT = """
             mutation DeleteReport($id: ID!) {
@@ -126,6 +128,7 @@ class TestReportMutations(TestCase):
                         "contentType": Report.ContentType.IFRAME.name,
                         "iframeUrl": "https://app.powerbi.com/embed/123",
                         "thematicArea": str(self.thematic_area.pk),
+                        "publishedAt": self.PUBLISHED_AT,
                     },
                 },
             )
@@ -137,6 +140,25 @@ class TestReportMutations(TestCase):
         assert resp["result"]["visibility"] == Report.Visibility.PUBLIC.name
         mock_trigger.assert_called_once()
 
+    def test_create_report_requires_thematic_area_and_published_at(self):
+        self.force_login(self.user)
+        data = {
+            "title": "Missing Required",
+            "contentType": Report.ContentType.IFRAME.name,
+            "iframeUrl": "https://example.com/embed",
+            "thematicArea": str(self.thematic_area.pk),
+            "publishedAt": self.PUBLISHED_AT,
+        }
+        for field in ("thematicArea", "publishedAt"):
+            with self.subTest(missing=field):
+                content = self.query_check(
+                    self.Mutation.CREATE_REPORT,
+                    assert_errors=True,
+                    variables={"data": {k: v for k, v in data.items() if k != field}},
+                )
+                assert f"Field '{field}' of required type" in content["errors"][0]["message"]
+        assert not Report.objects.filter(title="Missing Required").exists()
+
     def test_create_report_requires_auth(self):
         self.logout()
         content = self.query_check(
@@ -147,6 +169,7 @@ class TestReportMutations(TestCase):
                     "contentType": Report.ContentType.IFRAME.name,
                     "iframeUrl": "https://example.com/embed",
                     "thematicArea": str(self.thematic_area.pk),
+                    "publishedAt": self.PUBLISHED_AT,
                 },
             },
         )
@@ -209,6 +232,7 @@ class TestReportMutations(TestCase):
                         "contentType": Report.ContentType.IFRAME.name,
                         "iframeUrl": "https://example.com/embed",
                         "thematicArea": str(self.thematic_area.pk),
+                        "publishedAt": self.PUBLISHED_AT,
                         "reportType": Report.ReportType.REPORT.name,
                     },
                 },
@@ -216,6 +240,7 @@ class TestReportMutations(TestCase):
         resp = content["data"]["createReport"]
         assert resp["ok"] is True
         mock_trigger.assert_called_once()
+        assert mock_trigger.call_args.kwargs["trigger"] == DocumentExtractionRun.Trigger.REPORT_CREATED
 
     def test_create_non_report_type_skips_extraction(self):
         self.force_login(self.user)
@@ -229,6 +254,7 @@ class TestReportMutations(TestCase):
                         "contentType": Report.ContentType.IFRAME.name,
                         "iframeUrl": "https://example.com/embed",
                         "thematicArea": str(self.thematic_area.pk),
+                        "publishedAt": self.PUBLISHED_AT,
                         "reportType": Report.ReportType.MANUAL.name,
                     },
                 },
