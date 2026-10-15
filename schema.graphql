@@ -329,6 +329,8 @@ enum DocumentExtractionStatus {
   IN_PROGRESS
   SUCCESS
   FAILURE
+  PARTIAL_SUCCESS
+  TIMED_OUT
 }
 
 """

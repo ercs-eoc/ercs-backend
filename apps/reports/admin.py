@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import DocumentExtraction, Link, Report, ThematicArea
+from .models import DocumentExtraction, DocumentExtractionRun, Link, Report, ThematicArea
 
 
 @admin.register(ThematicArea)
@@ -16,6 +16,21 @@ class DocumentExtractionAdmin(admin.ModelAdmin):
     list_filter = ["status"]
     readonly_fields = ["report", "created_at", "chunk_type", "page_number", "updated_at"]
     ordering = ["-created_at"]
+
+
+@admin.register(DocumentExtractionRun)
+class DocumentExtractionRunAdmin(admin.ModelAdmin):
+    list_display = [
+        "report",
+        "status",
+        "trigger",
+        "created_at",
+        "queue_wait",
+        "duration",
+    ]
+    list_filter = ["status", "trigger", "doc_summary_generated"]
+    search_fields = ["report__title", "celery_task_id"]
+    list_select_related = ["report"]
 
 
 @admin.register(Link)

@@ -2,7 +2,7 @@ import strawberry
 import strawberry_django
 
 from apps.reports.extraction import trigger_document_extraction
-from apps.reports.models import Link, Report, ThematicArea
+from apps.reports.models import DocumentExtractionRun, Link, Report, ThematicArea
 from apps.reports.models import ReportType as ReportTypeEnum
 from apps.reports.serializers import LinkSerializer, ReportSerializer, ThematicAreaSerializer
 from main.graphql.context import Info
@@ -60,7 +60,10 @@ class Mutation:
     ) -> MutationResponseType[ReportType]:
         response = await ModelMutation(ReportSerializer).handle_create_mutation(data, info)
         if response.ok and response.result and response.result.report_type == ReportTypeEnum.REPORT:
-            await trigger_document_extraction(response.result)
+            await trigger_document_extraction(
+                response.result,
+                trigger=DocumentExtractionRun.Trigger.REPORT_CREATED,
+            )
         return response
 
     @strawberry_django.mutation(permission_classes=[IsAuthenticatedMutation])
@@ -74,7 +77,10 @@ class Mutation:
         response = await ModelMutation(ReportSerializer).handle_update_mutation(data, info, instance)
         file_replaced = data.file is not strawberry.UNSET and data.file is not None
         if response.ok and response.result and file_replaced and response.result.report_type == ReportTypeEnum.REPORT:
-            await trigger_document_extraction(response.result)
+            await trigger_document_extraction(
+                response.result,
+                trigger=DocumentExtractionRun.Trigger.FILE_REPLACED,
+            )
         return response
 
     @strawberry_django.mutation(permission_classes=[IsStaffOrAboveMutation])
