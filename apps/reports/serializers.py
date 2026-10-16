@@ -69,6 +69,13 @@ class ReportSerializer(serializers.ModelSerializer):
         content_type = attrs.get("content_type", getattr(self.instance, "content_type", None))
         file = attrs.get("file", getattr(self.instance, "file", None))
         iframe_url = attrs.get("iframe_url", getattr(self.instance, "iframe_url", None))
+        report_type = attrs.get("report_type", getattr(self.instance, "report_type", Report.ReportType.REPORT))
+        thematic_area = attrs.get("thematic_area", getattr(self.instance, "thematic_area", None))
+
+        if report_type == Report.ReportType.REPORT and not thematic_area:
+            raise serializers.ValidationError(
+                {"thematic_area": "A thematic area is required when report type is REPORT."},
+            )
 
         if content_type == ReportContentType.FILE and not file:
             raise serializers.ValidationError({"file": "A file is required when content_type is FILE."})

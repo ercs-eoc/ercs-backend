@@ -58,7 +58,7 @@ class CronJob(typing.NamedTuple):
 SCHEDULES: dict[str, CronJob] = {
     "sync_kobo": CronJob(
         task="apps.kobo.tasks.sync_kobo",
-        schedule=TimeConstants.EVERY_DAY_MIDNIGHT,
+        schedule=TimeConstants.EVERY_WEEK,
         options=CronJobOption(expires=2 * TimeConstants.SECONDS_IN_A_DAY),
     ),
 }

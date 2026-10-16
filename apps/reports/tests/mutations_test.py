@@ -140,24 +140,61 @@ class TestReportMutations(TestCase):
         assert resp["result"]["visibility"] == Report.Visibility.PUBLIC.name
         mock_trigger.assert_called_once()
 
-    def test_create_report_requires_thematic_area_and_published_at(self):
+    def test_create_report_requires_published_at(self):
+        self.force_login(self.user)
+        content = self.query_check(
+            self.Mutation.CREATE_REPORT,
+            assert_errors=True,
+            variables={
+                "data": {
+                    "title": "Missing Required",
+                    "contentType": Report.ContentType.IFRAME.name,
+                    "iframeUrl": "https://example.com/embed",
+                    "thematicArea": str(self.thematic_area.pk),
+                },
+            },
+        )
+        assert "Field 'publishedAt' of required type" in content["errors"][0]["message"]
+        assert not Report.objects.filter(title="Missing Required").exists()
+
+    def test_create_report_type_report_requires_thematic_area(self):
         self.force_login(self.user)
         data = {
-            "title": "Missing Required",
+            "title": "Missing Thematic Area",
             "contentType": Report.ContentType.IFRAME.name,
             "iframeUrl": "https://example.com/embed",
-            "thematicArea": str(self.thematic_area.pk),
             "publishedAt": self.PUBLISHED_AT,
         }
-        for field in ("thematicArea", "publishedAt"):
-            with self.subTest(missing=field):
+        # report_type omitted (defaults to REPORT) and explicitly REPORT
+        for extra in ({}, {"reportType": Report.ReportType.REPORT.name}):
+            with self.subTest(extra=extra):
                 content = self.query_check(
                     self.Mutation.CREATE_REPORT,
-                    assert_errors=True,
-                    variables={"data": {k: v for k, v in data.items() if k != field}},
+                    variables={"data": {**data, **extra}},
                 )
-                assert f"Field '{field}' of required type" in content["errors"][0]["message"]
-        assert not Report.objects.filter(title="Missing Required").exists()
+                resp = content["data"]["createReport"]
+                assert resp["ok"] is False
+                assert "thematic area is required" in str(resp["errors"])
+        assert not Report.objects.filter(title="Missing Thematic Area").exists()
+
+    def test_create_non_report_type_without_thematic_area(self):
+        self.force_login(self.user)
+        content = self.query_check(
+            self.Mutation.CREATE_REPORT,
+            variables={
+                "data": {
+                    "title": "Manual Without Thematic Area",
+                    "contentType": Report.ContentType.IFRAME.name,
+                    "iframeUrl": "https://example.com/embed",
+                    "publishedAt": self.PUBLISHED_AT,
+                    "reportType": Report.ReportType.MANUAL.name,
+                },
+            },
+        )
+        resp = content["data"]["createReport"]
+        assert resp["ok"] is True
+        assert resp["errors"] is None
+        assert Report.objects.get(title="Manual Without Thematic Area").thematic_area is None
 
     def test_create_report_requires_auth(self):
         self.logout()
