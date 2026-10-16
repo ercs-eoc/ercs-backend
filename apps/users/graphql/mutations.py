@@ -7,7 +7,7 @@ from strawberry_django.resolvers import django_resolver
 from apps.users.models import User
 from apps.users.serializers import UserSerializer
 from main.graphql.context import Info
-from main.graphql.permissions import IsAuthenticatedMutation, IsSuperAdminDelete, IsSuperAdminMutation
+from main.graphql.permissions import IsAuthenticatedMutation, IsHQAdminDelete, IsHQAdminMutation
 from utils.graphql.drf import MutationCustomErrorType
 from utils.graphql.mutations import ModelMutation
 from utils.graphql.types import DeleteMutationResponseType, MutationResponseType
@@ -33,7 +33,7 @@ class Mutation:
     def logout(self, info: Info) -> bool:
         return resolve_logout(info)  # type: ignore[reportReturnType]
 
-    @strawberry_django.mutation(permission_classes=[IsSuperAdminMutation])
+    @strawberry_django.mutation(permission_classes=[IsHQAdminMutation])
     async def create_user(
         self,
         info: Info,
@@ -41,7 +41,7 @@ class Mutation:
     ) -> MutationResponseType[UserType]:
         return await ModelMutation(UserSerializer).handle_create_mutation(data, info)
 
-    @strawberry_django.mutation(permission_classes=[IsSuperAdminMutation])
+    @strawberry_django.mutation(permission_classes=[IsHQAdminMutation])
     async def update_user(
         self,
         info: Info,
@@ -51,7 +51,7 @@ class Mutation:
         instance = await User.objects.aget(id=id)
         return await ModelMutation(UserSerializer).handle_update_mutation(data, info, instance)
 
-    @strawberry_django.mutation(permission_classes=[IsSuperAdminDelete], handle_django_errors=False)
+    @strawberry_django.mutation(permission_classes=[IsHQAdminDelete], handle_django_errors=False)
     async def delete_user(
         self,
         info: Info,
@@ -66,18 +66,18 @@ class Mutation:
                 ),
             )
         current_user: User = info.context.request.user  # type: ignore[reportAssignmentType]
-        if user.role == User.Role.SUPER_ADMIN and user.pk == current_user.pk:
+        if user.role == User.Role.HQ_ADMIN and user.pk == current_user.pk:
             return DeleteMutationResponseType(
                 ok=False,
                 errors=MutationCustomErrorType.generate_message(
-                    "You cannot deactivate your own super administrator account.",
+                    "You cannot deactivate your own HQ admin account.",
                 ),
             )
         user.is_active = False
         await user.asave(update_fields=["is_active"])
         return DeleteMutationResponseType(ok=True)
 
-    @strawberry_django.mutation(permission_classes=[IsSuperAdminMutation])
+    @strawberry_django.mutation(permission_classes=[IsHQAdminMutation])
     async def reset_user_password(
         self,
         info: Info,

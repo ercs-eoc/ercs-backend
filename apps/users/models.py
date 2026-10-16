@@ -13,7 +13,7 @@ from .managers import UserManager
 class UserRole(models.IntegerChoices):
     """Access-control roles assigned to users."""
 
-    SUPER_ADMIN = 10, "Super Admin"
+    HQ_ADMIN = 10, "HQ Admin"
     REGIONAL_ADMIN = 20, "Regional Admin"
     STAFF = 30, "Staff"
     PARTNER = 40, "Partner"
@@ -24,7 +24,8 @@ class User(AbstractBaseUser, PermissionsMixin):
     """Custom user model with email as the login identifier.
 
     Roles drive access control throughout the app:
-    - SUPER_ADMIN: full access across all regions
+    - HQ_ADMIN: full access across all regions (aggregate and regional dashboards, user management)
+      Must not be scoped to a region.
     - REGIONAL_ADMIN: access scoped to their assigned region
     - STAFF, PARTNER, VIEWER: read-access tiers
     """

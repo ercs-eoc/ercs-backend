@@ -1,5 +1,7 @@
 import typing
 
+from apps.geo.factories import AdminAreaFactory
+from apps.geo.models import AdminAreaLevel
 from apps.users.factories import UserFactory
 from apps.users.models import User
 from main.tests import TestCase
@@ -88,7 +90,7 @@ class TestUserMutations(TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls.super_admin = UserFactory.create(role=User.Role.SUPER_ADMIN)
+        cls.hq_admin = UserFactory.create(role=User.Role.HQ_ADMIN)
         cls.staff = UserFactory.create(role=User.Role.STAFF)
         cls.viewer = UserFactory.create(role=User.Role.VIEWER)
 
@@ -117,8 +119,8 @@ class TestUserMutations(TestCase):
     # createUser
     # ------------------------------------------------------------------
 
-    def test_super_admin_can_create_user(self):
-        self.force_login(self.super_admin)
+    def test_hq_admin_can_create_user(self):
+        self.force_login(self.hq_admin)
         content = self.query_check(
             self.Mutation.CREATE_USER,
             variables={
@@ -138,6 +140,26 @@ class TestUserMutations(TestCase):
         assert resp["result"]["role"] == User.Role.STAFF.name
         assert resp["result"]["isActive"] is True
         assert User.objects.filter(email="newstaff@ercs.org").exists()
+
+    def test_hq_admin_role_cannot_be_assigned_with_region(self):
+        region = AdminAreaFactory.create(level=AdminAreaLevel.REGION)
+        self.force_login(self.hq_admin)
+        content = self.query_check(
+            self.Mutation.CREATE_USER,
+            variables={
+                "data": {
+                    "email": "regionalhq@ercs.org",
+                    "fullName": "Regional HQ",
+                    "password": "securepassword123",
+                    "role": User.Role.HQ_ADMIN.name,
+                    "region": self.gID(region.pk),
+                },
+            },
+        )
+        resp = content["data"]["createUser"]
+        assert resp["ok"] is False
+        assert resp["errors"] is not None
+        assert not User.objects.filter(email="regionalhq@ercs.org").exists()
 
     def test_staff_cannot_create_user(self):
         self.force_login(self.staff)
@@ -173,8 +195,8 @@ class TestUserMutations(TestCase):
     # updateUser
     # ------------------------------------------------------------------
 
-    def test_super_admin_can_update_user(self):
-        self.force_login(self.super_admin)
+    def test_hq_admin_can_update_user(self):
+        self.force_login(self.hq_admin)
         target = UserFactory.create(role=User.Role.VIEWER, is_active=True)
         content = self.query_check(
             self.Mutation.UPDATE_USER,
@@ -201,8 +223,8 @@ class TestUserMutations(TestCase):
     # deleteUser
     # ------------------------------------------------------------------
 
-    def test_super_admin_can_delete_user(self):
-        self.force_login(self.super_admin)
+    def test_hq_admin_can_delete_user(self):
+        self.force_login(self.hq_admin)
         target = UserFactory.create()
         content = self.query_check(
             self.Mutation.DELETE_USER,
@@ -214,18 +236,18 @@ class TestUserMutations(TestCase):
         target.refresh_from_db()
         assert target.is_active is False
 
-    def test_super_admin_cannot_delete_self(self):
-        self.force_login(self.super_admin)
+    def test_hq_admin_cannot_delete_self(self):
+        self.force_login(self.hq_admin)
         content = self.query_check(
             self.Mutation.DELETE_USER,
-            variables={"id": self.gID(self.super_admin.pk)},
+            variables={"id": self.gID(self.hq_admin.pk)},
         )
         resp = content["data"]["deleteUser"]
         assert resp["ok"] is False
         assert resp["errors"] is not None
 
-        self.super_admin.refresh_from_db()
-        assert self.super_admin.is_active is True
+        self.hq_admin.refresh_from_db()
+        assert self.hq_admin.is_active is True
 
     def test_staff_cannot_delete_user(self):
         self.force_login(self.staff)
@@ -240,8 +262,8 @@ class TestUserMutations(TestCase):
     # resetUserPassword
     # ------------------------------------------------------------------
 
-    def test_super_admin_can_reset_password(self):
-        self.force_login(self.super_admin)
+    def test_hq_admin_can_reset_password(self):
+        self.force_login(self.hq_admin)
         target = UserFactory.create(password="oldpassword")
         content = self.query_check(
             self.Mutation.RESET_USER_PASSWORD,
@@ -315,7 +337,7 @@ class TestUserMutations(TestCase):
         self.assert_permission_denied(content, "updateMyPassword")
 
     def test_deleting_missing_user_is_reported_on_the_payload(self):
-        self.force_login(self.super_admin)
+        self.force_login(self.hq_admin)
         target = UserFactory.create()
         target_id = self.gID(target.pk)
         target.delete()

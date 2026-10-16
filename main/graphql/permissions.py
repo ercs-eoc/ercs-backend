@@ -39,7 +39,7 @@ class IsStaffOrAbove(BasePermission):
     allowed_roles: typing.ClassVar[tuple[UserRole, ...]] = (
         UserRole.STAFF,
         UserRole.REGIONAL_ADMIN,
-        UserRole.SUPER_ADMIN,
+        UserRole.HQ_ADMIN,
     )
     message = _role_denied_message(allowed_roles)
     error_extensions = {"code": "PERMISSION_DENIED"}  # noqa: RUF012
@@ -52,10 +52,10 @@ class IsStaffOrAbove(BasePermission):
         return user.role in self.allowed_roles
 
 
-class IsSuperAdmin(BasePermission):
-    """Allow only super admins."""
+class IsHQAdmin(BasePermission):
+    """Allow only HQ admins."""
 
-    allowed_roles: typing.ClassVar[tuple[UserRole, ...]] = (UserRole.SUPER_ADMIN,)
+    allowed_roles: typing.ClassVar[tuple[UserRole, ...]] = (UserRole.HQ_ADMIN,)
     message = _role_denied_message(allowed_roles)
     error_extensions = {"code": "PERMISSION_DENIED"}  # noqa: RUF012
 
@@ -100,7 +100,7 @@ class IsAuthenticatedMutation(MutationPermissionMixin, IsAuthenticated): ...
 class IsStaffOrAboveMutation(MutationPermissionMixin, IsStaffOrAbove): ...
 
 
-class IsSuperAdminMutation(MutationPermissionMixin, IsSuperAdmin): ...
+class IsHQAdminMutation(MutationPermissionMixin, IsHQAdmin): ...
 
 
 class IsAuthenticatedDelete(DeleteMutationPermissionMixin, IsAuthenticated): ...
@@ -109,4 +109,4 @@ class IsAuthenticatedDelete(DeleteMutationPermissionMixin, IsAuthenticated): ...
 class IsStaffOrAboveDelete(DeleteMutationPermissionMixin, IsStaffOrAbove): ...
 
 
-class IsSuperAdminDelete(DeleteMutationPermissionMixin, IsSuperAdmin): ...
+class IsHQAdminDelete(DeleteMutationPermissionMixin, IsHQAdmin): ...

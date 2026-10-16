@@ -1342,7 +1342,7 @@ input ReportCreateInput {
   iframeUrl: String
   visibility: ReportVisibility! = PUBLIC
   reportType: ReportTypeEnum! = REPORT
-  thematicArea: ID!
+  thematicArea: ID
   region: ID
   disasterType: String
   owner: String
@@ -1776,7 +1776,8 @@ input UserCreateInput {
 Custom user model with email as the login identifier.
 
 Roles drive access control throughout the app:
-- SUPER_ADMIN: full access across all regions
+- HQ_ADMIN: full access across all regions (aggregate and regional dashboards, user management)
+  Must not be scoped to a region.
 - REGIONAL_ADMIN: access scoped to their assigned region
 - STAFF, PARTNER, VIEWER: read-access tiers
 """
@@ -1796,7 +1797,8 @@ input UserFilter {
 Custom user model with email as the login identifier.
 
 Roles drive access control throughout the app:
-- SUPER_ADMIN: full access across all regions
+- HQ_ADMIN: full access across all regions (aggregate and regional dashboards, user management)
+  Must not be scoped to a region.
 - REGIONAL_ADMIN: access scoped to their assigned region
 - STAFF, PARTNER, VIEWER: read-access tiers
 """
@@ -1822,7 +1824,7 @@ input UserOrder @oneOf {
 }
 
 enum UserRole {
-  SUPER_ADMIN
+  HQ_ADMIN
   REGIONAL_ADMIN
   STAFF
   PARTNER
@@ -1833,7 +1835,8 @@ enum UserRole {
 Custom user model with email as the login identifier.
 
 Roles drive access control throughout the app:
-- SUPER_ADMIN: full access across all regions
+- HQ_ADMIN: full access across all regions (aggregate and regional dashboards, user management)
+  Must not be scoped to a region.
 - REGIONAL_ADMIN: access scoped to their assigned region
 - STAFF, PARTNER, VIEWER: read-access tiers
 """
