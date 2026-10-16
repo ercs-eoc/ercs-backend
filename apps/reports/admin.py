@@ -1,5 +1,7 @@
 from django.contrib import admin
 
+from apps.kobo.admin import ReadOnlyAdmin
+
 from .models import DocumentExtraction, DocumentExtractionRun, Link, Report, ThematicArea
 
 
@@ -19,7 +21,7 @@ class DocumentExtractionAdmin(admin.ModelAdmin):
 
 
 @admin.register(DocumentExtractionRun)
-class DocumentExtractionRunAdmin(admin.ModelAdmin):
+class DocumentExtractionRunAdmin(ReadOnlyAdmin):
     list_display = [
         "report",
         "status",
