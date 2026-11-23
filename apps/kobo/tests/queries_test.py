@@ -145,6 +145,53 @@ class TestStatsWindow(TestCase):
         assert stats.alert.people_affected == 1000
 
 
+class TestStatsDateRange(TestCase):
+    """An explicit date range replaces the default 6-month window (inclusive, open-ended)."""
+
+    class Query:
+        KOBO_STATS = """
+            query KoboStats($startDate: Date, $endDate: Date) {
+                koboStats(startDate: $startDate, endDate: $endDate) {
+                    alert { totalEmergencies peopleAffected }
+                }
+            }
+        """
+
+    @typing.override
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        for code, day, affected in [
+            ("EM-JAN", datetime.datetime(2025, 1, 15, 10, tzinfo=datetime.UTC), "100"),
+            ("EM-MAR", datetime.datetime(2025, 3, 31, 10, tzinfo=datetime.UTC), "200"),
+            ("EM-JUN", datetime.datetime(2025, 6, 1, 10, tzinfo=datetime.UTC), "400"),
+        ]:
+            KoboSubmissionFactory.create(
+                form=KoboForm.EMERGENCY_ALERT,
+                emergency_code=code,
+                submission_time=day,
+                raw={"ppl_impact_group/ppl_affected": affected, "emergency_code/unique_code": code},
+            )
+
+    def _alert(self, **variables):
+        content = self.query_check(self.Query.KOBO_STATS, variables=variables)
+        return content["data"]["koboStats"]["alert"]
+
+    def test_bounded_range_is_inclusive(self):
+        alert = self._alert(startDate="2025-01-15", endDate="2025-03-31")
+        assert alert["totalEmergencies"] == 2
+        assert alert["peopleAffected"] == 300
+
+    def test_open_ended_ranges(self):
+        assert self._alert(startDate="2025-02-01")["peopleAffected"] == 600
+        assert self._alert(endDate="2025-02-01")["peopleAffected"] == 100
+
+    def test_explicit_range_ignores_default_window(self):
+        # All three are well over 6 months old, so only an explicit range sees them.
+        assert self._alert()["totalEmergencies"] == 0
+        assert self._alert(startDate="2024-01-01")["totalEmergencies"] == 3
+
+
 class TestFieldResourceDedup(TestCase):
     """Mobilized resources are restated in every periodic sitrep, so they get the
     same per-(emergency, branch) treatment as People Reached.

@@ -40,7 +40,19 @@ from apps.kobo.models import VALIDATION_STATUS_APPROVED, KoboForm, KoboSubmissio
 # Headline stats show recent activity only: submissions from the last ~6 months
 # (by Kobo submission time). A calendar-exact boundary is unnecessary for a
 # dashboard window, so a fixed 180-day lookback keeps it dependency-free.
+# Used only when the caller gives no explicit date range.
 STATS_WINDOW = datetime.timedelta(days=180)
+
+
+class DateRange(NamedTuple):
+    """Inclusive submission-date bounds; either side may be open (``None``)."""
+
+    start: datetime.date | None = None
+    end: datetime.date | None = None
+
+    @property
+    def is_set(self) -> bool:
+        return self.start is not None or self.end is not None
 
 
 class Row(NamedTuple):
@@ -94,21 +106,28 @@ def _source(form: KoboForm, confirmed: int) -> KoboSource:
     )
 
 
-def _confirmed(form: KoboForm) -> list[Row]:
-    """Approved submissions for a form, limited to the last 6 months by submission time."""
-    since = timezone.now() - STATS_WINDOW
-    return [
-        Row(*values)
-        for values in KoboSubmission.objects.filter(
-            form=form,
-            validation_status=VALIDATION_STATUS_APPROVED,
-            submission_time__gte=since,
-        ).values_list("raw", "region__name", "emergency_code", "kobo_id")
-    ]
+def _confirmed(form: KoboForm, date_range: DateRange) -> list[Row]:
+    """Approved submissions for a form, limited by submission date.
+
+    With an explicit ``date_range`` its (inclusive, possibly open-ended) bounds
+    apply; otherwise the default ``STATS_WINDOW`` lookback does.
+    """
+    qs = KoboSubmission.objects.filter(
+        form=form,
+        validation_status=VALIDATION_STATUS_APPROVED,
+    )
+    if date_range.is_set:
+        if date_range.start is not None:
+            qs = qs.filter(submission_time__date__gte=date_range.start)
+        if date_range.end is not None:
+            qs = qs.filter(submission_time__date__lte=date_range.end)
+    else:
+        qs = qs.filter(submission_time__gte=timezone.now() - STATS_WINDOW)
+    return [Row(*values) for values in qs.values_list("raw", "region__name", "emergency_code", "kobo_id")]
 
 
-def _alert_stats() -> AlertStats:
-    rows = _confirmed(KoboForm.EMERGENCY_ALERT)
+def _alert_stats(date_range: DateRange) -> AlertStats:
+    rows = _confirmed(KoboForm.EMERGENCY_ALERT, date_range)
     # The promoted column, derived once during sync from `FORM_SPECS`.
     codes = {row.emergency_code for row in rows if row.emergency_code}
     return AlertStats(
@@ -124,8 +143,8 @@ def _alert_stats() -> AlertStats:
     )
 
 
-def _rapid_needs_stats() -> RapidNeedsStats:
-    rows = _confirmed(KoboForm.RAPID_NEEDS_ASSESSMENT)
+def _rapid_needs_stats(date_range: DateRange) -> RapidNeedsStats:
+    rows = _confirmed(KoboForm.RAPID_NEEDS_ASSESSMENT, date_range)
     return RapidNeedsStats(
         source=_source(KoboForm.RAPID_NEEDS_ASSESSMENT, len(rows)),
         total_assessments=len(rows),
@@ -176,8 +195,8 @@ def _support_requested(rows: list[Row]) -> int:
     return len({_branch_key(row) for row in rows if row.raw.get("branch_sitrep/resources_group/support_required")})
 
 
-def _field_stats() -> FieldStats:
-    rows = _confirmed(KoboForm.EMERGENCY_FIELD)
+def _field_stats(date_range: DateRange) -> FieldStats:
+    rows = _confirmed(KoboForm.EMERGENCY_FIELD, date_range)
     return FieldStats(
         source=_source(KoboForm.EMERGENCY_FIELD, len(rows)),
         total_reports=len(rows),
@@ -195,12 +214,20 @@ def _field_stats() -> FieldStats:
     )
 
 
-def build_kobo_stats() -> KoboStats:
+def build_kobo_stats(
+    start_date: datetime.date | None = None,
+    end_date: datetime.date | None = None,
+) -> KoboStats:
+    """Headline stats for submissions in ``[start_date, end_date]`` (by submission date).
+
+    Without either bound, falls back to the last ``STATS_WINDOW`` (~6 months).
+    """
+    date_range = DateRange(start=start_date, end=end_date)
     return KoboStats(
         generated_at=timezone.now(),
-        alert=_alert_stats(),
-        rapid_needs=_rapid_needs_stats(),
-        field=_field_stats(),
+        alert=_alert_stats(date_range),
+        rapid_needs=_rapid_needs_stats(date_range),
+        field=_field_stats(date_range),
     )
 
 

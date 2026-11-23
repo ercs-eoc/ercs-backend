@@ -1,3 +1,5 @@
+import datetime
+
 import strawberry
 import strawberry_django
 from asgiref.sync import sync_to_async
@@ -26,8 +28,13 @@ from .types import (
 class Query:
     @strawberry.field
     @sync_to_async
-    def kobo_stats(self) -> KoboStats:
-        return build_kobo_stats()
+    def kobo_stats(
+        self,
+        start_date: datetime.date | None = None,
+        end_date: datetime.date | None = None,
+    ) -> KoboStats:
+        # Inclusive submission-date range; omit both for the default last-6-months window.
+        return build_kobo_stats(start_date=start_date, end_date=end_date)
 
     # Approved ERCS Emergency Alerts, shaped as an emergencies list (paginated).
     kobo_emergencies: OffsetPaginated[KoboEmergencyType] = strawberry_django.offset_paginated(
