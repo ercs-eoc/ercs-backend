@@ -1307,7 +1307,7 @@ type Query {
   koboEmergencies(pagination: OffsetPaginationInput, ordering: [KoboSubmissionOrder!]! = []): KoboEmergencyTypeOffsetPaginated!
   koboSubmissions(pagination: OffsetPaginationInput, filters: KoboSubmissionFilter, ordering: [KoboSubmissionOrder!]! = []): KoboSubmissionTypeOffsetPaginated!
   koboSubmission(id: ID!): KoboSubmissionType!
-  koboStats: KoboStats!
+  koboStats(startDate: Date = null, endDate: Date = null): KoboStats!
   koboEmergency(id: ID!): KoboEmergencyDetail
   koboRapidNeeds(id: ID!): KoboRapidNeedsDetail
   koboFieldReport(id: ID!): KoboFieldReportDetail
