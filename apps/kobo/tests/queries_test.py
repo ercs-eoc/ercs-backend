@@ -186,6 +186,20 @@ class TestStatsDateRange(TestCase):
         assert self._alert(startDate="2025-02-01")["peopleAffected"] == 600
         assert self._alert(endDate="2025-02-01")["peopleAffected"] == 100
 
+    def test_same_day_range_is_valid(self):
+        assert self._alert(startDate="2025-03-31", endDate="2025-03-31")["peopleAffected"] == 200
+
+    def test_reversed_range_is_rejected(self):
+        content = self.query_check(
+            self.Query.KOBO_STATS,
+            assert_errors=True,
+            variables={"startDate": "2025-03-31", "endDate": "2025-01-15"},
+        )
+        (error,) = content["errors"]
+        assert error["message"] == "startDate must be on or before endDate."
+        assert error["extensions"]["code"] == "INVALID_DATE_RANGE"
+        assert content["data"] is None
+
     def test_explicit_range_ignores_default_window(self):
         # All three are well over 6 months old, so only an explicit range sees them.
         assert self._alert()["totalEmergencies"] == 0

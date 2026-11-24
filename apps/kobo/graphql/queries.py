@@ -3,6 +3,7 @@ import datetime
 import strawberry
 import strawberry_django
 from asgiref.sync import sync_to_async
+from graphql import GraphQLError
 from strawberry_django.pagination import OffsetPaginated
 
 from apps.kobo.stats import (
@@ -27,14 +28,19 @@ from .types import (
 @strawberry.type
 class Query:
     @strawberry.field
-    @sync_to_async
-    def kobo_stats(
+    async def kobo_stats(
         self,
         start_date: datetime.date | None = None,
         end_date: datetime.date | None = None,
     ) -> KoboStats:
         # Inclusive submission-date range; omit both for the default last-6-months window.
-        return build_kobo_stats(start_date=start_date, end_date=end_date)
+        # A reversed range would otherwise match nothing and quietly return all-zero stats.
+        if start_date is not None and end_date is not None and start_date > end_date:
+            raise GraphQLError(
+                "startDate must be on or before endDate.",
+                extensions={"code": "INVALID_DATE_RANGE"},
+            )
+        return await sync_to_async(build_kobo_stats)(start_date=start_date, end_date=end_date)
 
     # Approved ERCS Emergency Alerts, shaped as an emergencies list (paginated).
     kobo_emergencies: OffsetPaginated[KoboEmergencyType] = strawberry_django.offset_paginated(
