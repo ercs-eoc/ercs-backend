@@ -318,6 +318,7 @@ type DjangoFileType {
   name: String!
   size: Int!
   url: String!
+  contentType: String
 }
 
 type DjangoModelType {
@@ -509,6 +510,14 @@ type FieldStats {
   ambulancesMobilized: Int!
   supportRequested: Int!
   byRegion: [KeyCount!]!
+}
+
+enum FileTypeEnum {
+  PDF
+  WORD
+  EXCEL
+  CSV
+  IMAGE
 }
 
 input GalleryAlbumCreateInput {
@@ -1235,6 +1244,7 @@ input PmerReportFilter {
   NOT: PmerReportFilter
   DISTINCT: Boolean
   search: String
+  fileTypes: [FileTypeEnum!]
 }
 
 input PmerReportOrder @oneOf {
@@ -1391,6 +1401,7 @@ input ReportFilter {
   DISTINCT: Boolean
   search: String
   regions: [ID!]
+  fileTypes: [FileTypeEnum!]
 }
 
 """

@@ -17,6 +17,7 @@ from apps.reports.models import (
 )
 from apps.reports.models import LinkType as LinkTypeEnum
 from apps.reports.models import ReportType as ReportTypeEnum
+from utils.file_types import FileTypeEnum, file_type_q
 
 
 def _get_ranked_ids(value: str) -> list[UUID]:
@@ -71,6 +72,10 @@ class ReportFilter:
     @strawberry_django.filter_field
     def regions(self, queryset, value: list[strawberry.ID], prefix: str) -> Q:
         return Q(region_id__in=value)
+
+    @strawberry_django.filter_field
+    def file_types(self, value: list[FileTypeEnum], prefix: str) -> Q:
+        return file_type_q(f"{prefix}file", value)
 
 
 @strawberry_django.filters.filter(DocumentExtraction)

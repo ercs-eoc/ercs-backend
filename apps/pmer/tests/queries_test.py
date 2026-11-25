@@ -27,7 +27,7 @@ class TestPmerReportQueries(TestCase):
                         department
                         project
                         region { id name level }
-                        file { name size url }
+                        file { name size url contentType }
                         createdBy { id email fullName }
                         createdAt
                     }
@@ -76,6 +76,7 @@ class TestPmerReportQueries(TestCase):
             region=cls.tigray,
             visibility=PmerReport.Visibility.PRIVATE,
             created_by=cls.user,
+            file__filename="wash-monitoring.xlsx",
         )
 
     def test_pmer_reports_authenticated(self):
@@ -161,6 +162,34 @@ class TestPmerReportQueries(TestCase):
         resp = content["data"]["pmerReports"]
         assert resp["totalCount"] == 1
         assert resp["results"][0]["project"] == "National Preparedness Programme"
+
+    def test_file_content_type(self):
+        self.force_login(self.user)
+        content = self.query_check(
+            self.Query.PMER_REPORTS,
+            variables={"pagination": {"limit": 10, "offset": 0}},
+        )
+        assert [result["file"]["contentType"] for result in content["data"]["pmerReports"]["results"]] == [
+            "application/pdf",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ]
+
+    def file_types_check(self, file_types: list[str]) -> list[str]:
+        self.force_login(self.user)
+        content = self.query_check(
+            self.Query.PMER_REPORTS,
+            variables={
+                "pagination": {"limit": 10, "offset": 0},
+                "filters": {"fileTypes": file_types},
+            },
+        )
+        return [result["id"] for result in content["data"]["pmerReports"]["results"]]
+
+    def test_filter_by_file_types(self):
+        assert self.file_types_check(["PDF"]) == [str(self.dpr_report.pk)]
+        assert self.file_types_check(["EXCEL"]) == [str(self.wash_report.pk)]
+        assert self.file_types_check(["PDF", "EXCEL"]) == [str(self.dpr_report.pk), str(self.wash_report.pk)]
+        assert self.file_types_check(["IMAGE"]) == []
 
     def search_check(self, value: str) -> list[dict]:
         self.force_login(self.user)
