@@ -1,7 +1,7 @@
 import typing
 
 from apps.geo.factories import RegionFactory
-from apps.pmer.factories import PmerReportFactory
+from apps.pmer.factories import PmerCategoryFactory, PmerDocumentTypeFactory, PmerReportFactory
 from apps.pmer.models import PmerReport
 from apps.users.factories import UserFactory
 from main.tests import TestCase
@@ -18,10 +18,8 @@ class TestPmerReportQueries(TestCase):
                         id
                         title
                         description
-                        category
-                        categoryDisplay
-                        reportType
-                        reportTypeDisplay
+                        category { id name }
+                        reportType { id name }
                         visibility
                         visibilityDisplay
                         department
@@ -40,8 +38,8 @@ class TestPmerReportQueries(TestCase):
                 pmerReport(id: $id) {
                     id
                     title
-                    category
-                    reportType
+                    category { id name }
+                    reportType { id name }
                     visibility
                     department
                     project
@@ -56,11 +54,15 @@ class TestPmerReportQueries(TestCase):
         super().setUpClass()
         cls.user = UserFactory.create()
         cls.afar = RegionFactory.create(name="Afar")
+        cls.dpr = PmerCategoryFactory.create(name="DPR")
+        cls.health_and_wash = PmerCategoryFactory.create(name="Health & WASH")
+        cls.strategic_plan = PmerDocumentTypeFactory.create(name="Strategic Plan")
+        cls.annual_report = PmerDocumentTypeFactory.create(name="Annual Report")
         cls.tigray = RegionFactory.create(name="Tigray")
         cls.dpr_report = PmerReportFactory.create(
             title="Annual Preparedness Review",
-            category=PmerReport.Category.DPR,
-            report_type=PmerReport.DocumentType.STRATEGIC_PLAN,
+            category=cls.dpr,
+            report_type=cls.strategic_plan,
             department="Disaster Management",
             project="National Preparedness Programme",
             region=cls.afar,
@@ -69,8 +71,8 @@ class TestPmerReportQueries(TestCase):
         )
         cls.wash_report = PmerReportFactory.create(
             title="WASH Monitoring Q1",
-            category=PmerReport.Category.HEALTH_AND_WASH,
-            report_type=PmerReport.DocumentType.ANNUAL_REPORT,
+            category=cls.health_and_wash,
+            report_type=cls.annual_report,
             department="Health",
             project="WASH Scale-Up",
             region=cls.tigray,
@@ -101,8 +103,8 @@ class TestPmerReportQueries(TestCase):
         )
         resp = content["data"]["pmerReport"]
         assert resp["id"] == str(self.dpr_report.pk)
-        assert resp["category"] == self.genum(PmerReport.Category.DPR)
-        assert resp["reportType"] == self.genum(PmerReport.DocumentType.STRATEGIC_PLAN)
+        assert resp["category"] == {"id": str(self.dpr.pk), "name": "DPR"}
+        assert resp["reportType"] == {"id": str(self.strategic_plan.pk), "name": "Strategic Plan"}
         assert resp["visibility"] == self.genum(PmerReport.Visibility.PUBLIC)
         assert resp["department"] == "Disaster Management"
         assert resp["project"] == "National Preparedness Programme"
@@ -114,14 +116,13 @@ class TestPmerReportQueries(TestCase):
             self.Query.PMER_REPORTS,
             variables={
                 "pagination": {"limit": 10, "offset": 0},
-                "filters": {"category": self.genum(PmerReport.Category.HEALTH_AND_WASH)},
+                "filters": {"categoryId": str(self.health_and_wash.pk)},
             },
         )
         resp = content["data"]["pmerReports"]
         assert resp["totalCount"] == 1
         result = resp["results"][0]
-        assert result["category"] == self.genum(PmerReport.Category.HEALTH_AND_WASH)
-        assert result["categoryDisplay"] == "Health & WASH"
+        assert result["category"] == {"id": str(self.health_and_wash.pk), "name": "Health & WASH"}
         assert result["file"]["name"]
 
     def test_filter_by_title(self):
@@ -251,15 +252,14 @@ class TestPmerReportQueries(TestCase):
             self.Query.PMER_REPORTS,
             variables={
                 "pagination": {"limit": 10, "offset": 0},
-                "filters": {"reportType": self.genum(PmerReport.DocumentType.STRATEGIC_PLAN)},
+                "filters": {"reportTypeId": str(self.strategic_plan.pk)},
             },
         )
         resp = content["data"]["pmerReports"]
         assert resp["totalCount"] == 1
         result = resp["results"][0]
         assert result["id"] == str(self.dpr_report.pk)
-        assert result["reportType"] == self.genum(PmerReport.DocumentType.STRATEGIC_PLAN)
-        assert result["reportTypeDisplay"] == "Strategic Plan"
+        assert result["reportType"] == {"id": str(self.strategic_plan.pk), "name": "Strategic Plan"}
 
     def test_filter_by_visibility(self):
         self.force_login(self.user)
@@ -299,3 +299,53 @@ class TestPmerReportQueries(TestCase):
             variables={"id": str(no_region.pk)},
         )
         assert content["data"]["pmerReport"]["region"] is None
+
+
+class TestPmerLookupQueries(TestCase):
+    class Query:
+        PMER_CATEGORIES = """
+            query PmerCategories($filters: PmerCategoryFilter) {
+                pmerCategories(filters: $filters) {
+                    totalCount
+                    results { id name }
+                }
+            }
+        """
+
+        PMER_DOCUMENT_TYPES = """
+            query PmerDocumentTypes($filters: PmerDocumentTypeFilter) {
+                pmerDocumentTypes(filters: $filters) {
+                    totalCount
+                    results { id name }
+                }
+            }
+        """
+
+    @typing.override
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.drr = PmerCategoryFactory.create(name="DRR")
+        cls.dpr = PmerCategoryFactory.create(name="DPR")
+        cls.annual_plan = PmerDocumentTypeFactory.create(name="Annual Plan")
+        cls.annual_report = PmerDocumentTypeFactory.create(name="Annual Report")
+        cls.strategic_plan = PmerDocumentTypeFactory.create(name="Strategic Plan")
+
+    def test_pmer_categories(self):
+        content = self.query_check(self.Query.PMER_CATEGORIES)
+        resp = content["data"]["pmerCategories"]
+        assert resp["totalCount"] == 2
+        assert {(r["id"], r["name"]) for r in resp["results"]} == {
+            (str(self.dpr.pk), "DPR"),
+            (str(self.drr.pk), "DRR"),
+        }
+
+    def test_pmer_categories_search(self):
+        content = self.query_check(self.Query.PMER_CATEGORIES, variables={"filters": {"search": "dr"}})
+        assert [r["id"] for r in content["data"]["pmerCategories"]["results"]] == [str(self.drr.pk)]
+
+    def test_pmer_document_types_search(self):
+        content = self.query_check(self.Query.PMER_DOCUMENT_TYPES, variables={"filters": {"search": "annual"}})
+        resp = content["data"]["pmerDocumentTypes"]
+        assert resp["totalCount"] == 2
+        assert {r["name"] for r in resp["results"]} == {"Annual Plan", "Annual Report"}
