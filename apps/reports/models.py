@@ -1,6 +1,8 @@
 import datetime
 import typing
 
+from django.contrib.postgres.indexes import GinIndex
+from django.contrib.postgres.search import SearchVector, SearchVectorField
 from django.core.exceptions import ValidationError
 from django.db import models
 from django_choices_field import IntegerChoicesField
@@ -192,6 +194,12 @@ class DocumentExtraction(BaseModel):
     # the signal across the whole document summary. `embedding` above stays null
     # for these rows since there is no single vector representing all of them.
     section_embeddings = models.JSONField(default=list, blank=True)
+    # Stored full-text vector of `text` (GIN-indexed), used by keyword search.
+    search_vector = models.GeneratedField(
+        expression=SearchVector("text", config="english"),
+        output_field=SearchVectorField(),
+        db_persist=True,
+    )
     status: int = IntegerChoicesField(choices_enum=DocumentExtractionStatus, default=DocumentExtractionStatus.PENDING)  # type: ignore[reportAssignmentType]
 
     class Meta:  # type: ignore[reportIncompatibleVariableOverride]
@@ -206,6 +214,7 @@ class DocumentExtraction(BaseModel):
                 opclasses=["vector_cosine_ops"],
                 condition=models.Q(embedding__isnull=False),
             ),
+            GinIndex(name="doc_search_vector_gin_idx", fields=["search_vector"]),
         ]
 
     @typing.override
