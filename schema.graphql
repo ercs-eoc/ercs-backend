@@ -712,6 +712,25 @@ The full record is preserved in ``raw``; a handful of keys are promoted to
 columns for indexing/joining/aggregation. Populated exclusively by the sync
 job (``sync_kobo``), which reconciles the table to match Kobo on every run
 """
+input KoboEmergencyFilter {
+  AND: KoboEmergencyFilter
+  OR: KoboEmergencyFilter
+  NOT: KoboEmergencyFilter
+  DISTINCT: Boolean
+  regions: [ID!]
+  regionNames: [String!]
+  hazards: [String!]
+  startDateGte: Date
+  startDateLte: Date
+}
+
+"""
+A single Kobo submission, mirrored verbatim.
+
+The full record is preserved in ``raw``; a handful of keys are promoted to
+columns for indexing/joining/aggregation. Populated exclusively by the sync
+job (``sync_kobo``), which reconciles the table to match Kobo on every run
+"""
 type KoboEmergencyType {
   id: ID!
 
@@ -1394,7 +1413,7 @@ type Query {
   teamMembers(pagination: OffsetPaginationInput, filters: TeamMemberFilter, ordering: [TeamMemberOrder!]! = []): TeamMemberTypeOffsetPaginated!
   teamMember(id: ID!): TeamMemberType!
   createTeamMemberTemplate: String!
-  koboEmergencies(pagination: OffsetPaginationInput, ordering: [KoboSubmissionOrder!]! = []): KoboEmergencyTypeOffsetPaginated!
+  koboEmergencies(pagination: OffsetPaginationInput, filters: KoboEmergencyFilter, ordering: [KoboSubmissionOrder!]! = []): KoboEmergencyTypeOffsetPaginated!
   koboHazards: [KoboHazardType!]!
   koboSubmissions(pagination: OffsetPaginationInput, filters: KoboSubmissionFilter, ordering: [KoboSubmissionOrder!]! = []): KoboSubmissionTypeOffsetPaginated!
   koboSubmission(id: ID!): KoboSubmissionType!

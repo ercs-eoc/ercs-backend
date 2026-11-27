@@ -1,5 +1,6 @@
 import datetime
 import typing
+import uuid
 
 from apps.kobo.factories import KoboSubmissionFactory
 from apps.kobo.models import KoboForm, KoboHazard, KoboSyncState
@@ -491,6 +492,125 @@ class TestKoboReportDetailQueries(TestCase):
         assert detail["latestDevelopments"] == "Early action activities in Korahe zone."
 
 
+class TestKoboEmergenciesFilter(TestCase):
+    """`koboEmergencies(filters:)` narrows alerts by region and hazard."""
+
+    class Query:
+        KOBO_EMERGENCIES = """
+            query KoboEmergencies($filters: KoboEmergencyFilter) {
+                koboEmergencies(filters: $filters) {
+                    totalCount
+                    results { id hazard region }
+                }
+            }
+        """
+
+    @typing.override
+    def setUp(self):
+        super().setUp()
+        # `region` FK left empty on purpose: the filter reads `raw["geo/region-one"]`.
+        self.flood_south = KoboSubmissionFactory.create(raw={"context/hazard": "flood", "geo/region-one": "South_Ethiopia"})
+        self.drought_south = KoboSubmissionFactory.create(
+            raw={"context/hazard": "drought", "geo/region-one": "South_Ethiopia"},
+        )
+        self.flood_afar = KoboSubmissionFactory.create(raw={"context/hazard": "flood", "geo/region-one": "Afar"})
+        # Not an approved alert: must never show up, whatever the filter.
+        KoboSubmissionFactory.create(
+            raw={"context/hazard": "flood", "geo/region-one": "Afar"},
+            form=KoboForm.RAPID_NEEDS_ASSESSMENT,
+        )
+
+    def _ids(self, filters: dict[str, typing.Any] | None = None) -> set[str]:
+        content = self.query_check(self.Query.KOBO_EMERGENCIES, variables={"filters": filters})
+        return {item["id"] for item in content["data"]["koboEmergencies"]["results"]}
+
+    def test_no_filter_returns_all_alerts(self):
+        assert self._ids() == {str(s.id) for s in (self.flood_south, self.drought_south, self.flood_afar)}
+
+    def test_filter_by_region_name(self):
+        assert self._ids({"regionNames": ["South Ethiopia"]}) == {
+            str(self.flood_south.id),
+            str(self.drought_south.id),
+        }
+
+    def test_filter_by_hazard(self):
+        assert self._ids({"hazards": ["flood"]}) == {str(self.flood_south.id), str(self.flood_afar.id)}
+        assert self._ids({"hazards": ["flood", "drought"]}) == {
+            str(s.id) for s in (self.flood_south, self.drought_south, self.flood_afar)
+        }
+
+    def test_filter_by_region_and_hazard(self):
+        assert self._ids({"regionNames": ["South Ethiopia"], "hazards": ["flood"]}) == {str(self.flood_south.id)}
+
+    def test_region_name_filter_accepts_raw_spelling_and_any_case(self):
+        expected = {str(self.flood_south.id), str(self.drought_south.id)}
+        assert self._ids({"regionNames": ["South_Ethiopia"]}) == expected
+        assert self._ids({"regionNames": ["south ethiopia"]}) == expected
+        assert self._ids({"regionNames": ["South Ethiopia", "Afar"]}) == expected | {str(self.flood_afar.id)}
+
+    def test_empty_region_name_list_matches_nothing(self):
+        assert self._ids({"regionNames": []}) == set()
+
+    def test_filter_by_region_id_matches_raw_region_name(self):
+        # FK unset (as after a sync with no name match): the AdminArea's name is matched
+        # against the raw Kobo region, so "South Ethiopia" finds "South_Ethiopia".
+        from apps.geo.factories import RegionFactory
+
+        south = RegionFactory.create(name="South Ethiopia")
+        assert self._ids({"regions": [str(south.id)]}) == {str(self.flood_south.id), str(self.drought_south.id)}
+
+    def test_filter_by_region_id_matches_fk(self):
+        from apps.geo.factories import RegionFactory
+
+        area = RegionFactory.create(name="Somewhere Else")
+        linked = KoboSubmissionFactory.create(region=area, raw={"context/hazard": "fire"})
+        assert self._ids({"regions": [str(area.id)]}) == {str(linked.id)}
+
+    def test_filter_by_region_id_and_hazard(self):
+        from apps.geo.factories import RegionFactory
+
+        afar = RegionFactory.create(name="Afar")
+        south = RegionFactory.create(name="South Ethiopia")
+        assert self._ids({"regions": [str(afar.id), str(south.id)], "hazards": ["flood"]}) == {
+            str(self.flood_south.id),
+            str(self.flood_afar.id),
+        }
+
+    def test_unknown_region_id_matches_nothing(self):
+        assert self._ids({"regions": [str(uuid.uuid4())]}) == set()
+
+    def _onset_alerts(self) -> dict[str, typing.Any]:
+        return {
+            day: KoboSubmissionFactory.create(raw={"context/hazard": "flood", "context/start_date": day})
+            for day in ("2026-01-31", "2026-02-01", "2026-02-15", "2026-03-01")
+        }
+
+    def test_filter_by_start_date_range_is_inclusive(self):
+        alerts = self._onset_alerts()
+        assert self._ids({"startDateGte": "2026-02-01", "startDateLte": "2026-03-01"}) == {
+            str(alerts[d].id) for d in ("2026-02-01", "2026-02-15", "2026-03-01")
+        }
+
+    def test_filter_by_open_ended_start_date(self):
+        alerts = self._onset_alerts()
+        assert self._ids({"startDateGte": "2026-02-15"}) == {str(alerts[d].id) for d in ("2026-02-15", "2026-03-01")}
+        assert self._ids({"startDateLte": "2026-01-31"}) == {str(alerts["2026-01-31"].id)}
+
+    def test_start_date_filter_excludes_alerts_without_onset_date(self):
+        # setUp's alerts have no `context/start_date`; a date bound must not match them.
+        self._onset_alerts()
+        assert not self._ids({"startDateGte": "2000-01-01"}) & {
+            str(s.id) for s in (self.flood_south, self.drought_south, self.flood_afar)
+        }
+
+    def test_start_date_combines_with_hazard(self):
+        alerts = self._onset_alerts()
+        KoboSubmissionFactory.create(raw={"context/hazard": "drought", "context/start_date": "2026-02-10"})
+        assert self._ids({"startDateGte": "2026-02-01", "startDateLte": "2026-02-28", "hazards": ["flood"]}) == {
+            str(alerts[d].id) for d in ("2026-02-01", "2026-02-15")
+        }
+
+
 class TestKoboHazardsQuery(TestCase):
     """Lists the active hazard choices (seeded by migration), ordered by label."""
 
@@ -511,3 +631,20 @@ class TestKoboHazardsQuery(TestCase):
         by_code = {h["code"]: h for h in hazards}
         assert by_code["conflict"]["goDisasterTypeId"] == 7
         assert by_code["Wind storm"]["goDisasterTypeId"] is None
+
+    def test_hazard_codes_filter_kobo_emergencies(self):
+        # Codes from `koboHazards` (as the frontend dropdown sends them) match alerts as stored by Kobo.
+        storm = KoboSubmissionFactory.create(raw={"context/hazard": "Wind storm"})
+        KoboSubmissionFactory.create(raw={"context/hazard": "flood"})
+        codes = [h["code"] for h in self.query_check(self.QUERY)["data"]["koboHazards"]]
+        assert "Wind storm" in codes
+
+        content = self.query_check(
+            """
+            query($filters: KoboEmergencyFilter) {
+                koboEmergencies(filters: $filters) { results { id } }
+            }
+            """,
+            variables={"filters": {"hazards": ["Wind storm"]}},
+        )
+        assert [r["id"] for r in content["data"]["koboEmergencies"]["results"]] == [str(storm.id)]
