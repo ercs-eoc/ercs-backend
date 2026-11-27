@@ -83,8 +83,6 @@ type AppEnumCollection {
   DashboardPage: [AppEnumCollectionDashboardPage!]!
   TeamMemberSex: [AppEnumCollectionTeamMemberSex!]!
   KoboForm: [AppEnumCollectionKoboForm!]!
-  PmerReportCategory: [AppEnumCollectionPmerReportCategory!]!
-  PmerReportDocumentType: [AppEnumCollectionPmerReportDocumentType!]!
 }
 
 type AppEnumCollectionAdminAreaLevel {
@@ -109,16 +107,6 @@ type AppEnumCollectionKoboForm {
 
 type AppEnumCollectionLinkType {
   key: LinkTypeEnum!
-  label: String!
-}
-
-type AppEnumCollectionPmerReportCategory {
-  key: PmerReportCategory!
-  label: String!
-}
-
-type AppEnumCollectionPmerReportDocumentType {
-  key: PmerReportDocumentType!
   label: String!
 }
 
@@ -232,6 +220,10 @@ union CreateNewsPostPayload = NewsPostTypeMutationResponseType | OperationInfo
 
 union CreateNewsPostReportPayload = NewsPostReportTypeMutationResponseType | OperationInfo
 
+union CreatePmerCategoryPayload = PmerCategoryTypeMutationResponseType | OperationInfo
+
+union CreatePmerDocumentTypePayload = PmerDocumentTypeTypeMutationResponseType | OperationInfo
+
 union CreatePmerReportPayload = PmerReportTypeMutationResponseType | OperationInfo
 
 union CreateReportPayload = ReportTypeMutationResponseType | OperationInfo
@@ -318,6 +310,7 @@ type DjangoFileType {
   name: String!
   size: Int!
   url: String!
+  contentType: String
 }
 
 type DjangoModelType {
@@ -511,6 +504,14 @@ type FieldStats {
   byRegion: [KeyCount!]!
 }
 
+enum FileTypeEnum {
+  PDF
+  WORD
+  EXCEL
+  CSV
+  IMAGE
+}
+
 input GalleryAlbumCreateInput {
   title: String!
   description: String
@@ -702,6 +703,25 @@ type KoboEmergencyDetail {
   longitude: Float
   rapidNeeds: [KoboRelatedReport!]!
   fieldReports: [KoboRelatedReport!]!
+}
+
+"""
+A single Kobo submission, mirrored verbatim.
+
+The full record is preserved in ``raw``; a handful of keys are promoted to
+columns for indexing/joining/aggregation. Populated exclusively by the sync
+job (``sync_kobo``), which reconciles the table to match Kobo on every run
+"""
+input KoboEmergencyFilter {
+  AND: KoboEmergencyFilter
+  OR: KoboEmergencyFilter
+  NOT: KoboEmergencyFilter
+  DISTINCT: Boolean
+  regions: [ID!]
+  regionNames: [String!]
+  hazards: [String!]
+  startDateGte: Date
+  startDateLte: Date
 }
 
 """
@@ -1031,6 +1051,12 @@ type Mutation {
   deleteTeamMember(id: ID!): DeleteMutationResponseType!
   deleteTeam(id: ID!): DeleteMutationResponseType!
   bulkCreateTeamMembers(data: TeamMemberBulkCreateInput!): BulkCreateTeamMembersPayload!
+  createPmerCategory(data: PmerCategoryInput!): CreatePmerCategoryPayload!
+  updatePmerCategory(id: ID!, data: PmerCategoryInput!): UpdatePmerCategoryPayload!
+  deletePmerCategory(id: ID!): DeleteMutationResponseType!
+  createPmerDocumentType(data: PmerDocumentTypeInput!): CreatePmerDocumentTypePayload!
+  updatePmerDocumentType(id: ID!, data: PmerDocumentTypeInput!): UpdatePmerDocumentTypePayload!
+  deletePmerDocumentType(id: ID!): DeleteMutationResponseType!
   createPmerReport(data: PmerReportCreateInput!): CreatePmerReportPayload!
   updatePmerReport(id: ID!, data: PmerReportUpdateInput!): UpdatePmerReportPayload!
   deletePmerReport(id: ID!): DeleteMutationResponseType!
@@ -1193,18 +1219,93 @@ input PasswordUpdateInput {
   newPassword: String!
 }
 
-enum PmerReportCategory {
-  DPR
-  DRR
-  HEALTH_AND_WASH
-  VOLUNTEER_SERVICE_MEMBERSHIP
+"""User-managed thematic category a PMER report belongs to."""
+input PmerCategoryFilter {
+  id: ID
+  name: String
+  AND: PmerCategoryFilter
+  OR: PmerCategoryFilter
+  NOT: PmerCategoryFilter
+  DISTINCT: Boolean
+  search: String
+}
+
+input PmerCategoryInput {
+  name: String!
+}
+
+"""User-managed thematic category a PMER report belongs to."""
+type PmerCategoryType {
+  id: ID!
+  name: String!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type PmerCategoryTypeMutationResponseType {
+  ok: Boolean!
+  errors: CustomErrorType
+  result: PmerCategoryType
+}
+
+type PmerCategoryTypeOffsetPaginated {
+  pageInfo: OffsetPaginationInfo!
+
+  """Total count of existing results."""
+  totalCount: Int!
+
+  """List of paginated results."""
+  results: [PmerCategoryType!]!
+}
+
+"""
+User-managed kind of PMER document (e.g. Strategic Plan, Annual Report).
+"""
+input PmerDocumentTypeFilter {
+  id: ID
+  name: String
+  AND: PmerDocumentTypeFilter
+  OR: PmerDocumentTypeFilter
+  NOT: PmerDocumentTypeFilter
+  DISTINCT: Boolean
+  search: String
+}
+
+input PmerDocumentTypeInput {
+  name: String!
+}
+
+"""
+User-managed kind of PMER document (e.g. Strategic Plan, Annual Report).
+"""
+type PmerDocumentTypeType {
+  id: ID!
+  name: String!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type PmerDocumentTypeTypeMutationResponseType {
+  ok: Boolean!
+  errors: CustomErrorType
+  result: PmerDocumentTypeType
+}
+
+type PmerDocumentTypeTypeOffsetPaginated {
+  pageInfo: OffsetPaginationInfo!
+
+  """Total count of existing results."""
+  totalCount: Int!
+
+  """List of paginated results."""
+  results: [PmerDocumentTypeType!]!
 }
 
 """Planning, Monitoring, Evaluation and Reporting (PMER) document."""
 input PmerReportCreateInput {
   title: String!
-  category: PmerReportCategory!
-  reportType: PmerReportDocumentType!
+  category: ID!
+  reportType: ID!
   file: Upload!
   description: String
   department: String
@@ -1213,18 +1314,11 @@ input PmerReportCreateInput {
   visibility: ReportVisibility! = PUBLIC
 }
 
-enum PmerReportDocumentType {
-  STRATEGIC_PLAN
-  ANNUAL_PLAN
-  ANNUAL_REPORT
-  MID_TERM_REVIEW_REPORT
-}
-
 """Planning, Monitoring, Evaluation and Reporting (PMER) document."""
 input PmerReportFilter {
   id: ID
-  category: PmerReportCategory
-  reportType: PmerReportDocumentType
+  categoryId: ID
+  reportTypeId: ID
   title: StrFilterLookup
   department: StrFilterLookup
   project: StrFilterLookup
@@ -1235,6 +1329,7 @@ input PmerReportFilter {
   NOT: PmerReportFilter
   DISTINCT: Boolean
   search: String
+  fileTypes: [FileTypeEnum!]
 }
 
 input PmerReportOrder @oneOf {
@@ -1247,8 +1342,8 @@ type PmerReportType {
   title: String!
   description: String
   file: DjangoFileType!
-  category: PmerReportCategory!
-  reportType: PmerReportDocumentType!
+  category: PmerCategoryType!
+  reportType: PmerDocumentTypeType!
   createdBy: UserType!
   createdAt: DateTime!
   updatedAt: DateTime!
@@ -1256,8 +1351,6 @@ type PmerReportType {
   department: String
   project: String
   visibility: ReportVisibility!
-  categoryDisplay: String!
-  reportTypeDisplay: String!
   visibilityDisplay: String!
 }
 
@@ -1280,8 +1373,8 @@ type PmerReportTypeOffsetPaginated {
 """Planning, Monitoring, Evaluation and Reporting (PMER) document."""
 input PmerReportUpdateInput {
   title: String
-  category: PmerReportCategory
-  reportType: PmerReportDocumentType
+  category: ID
+  reportType: ID
   file: Upload
   description: String
   department: String
@@ -1320,7 +1413,7 @@ type Query {
   teamMembers(pagination: OffsetPaginationInput, filters: TeamMemberFilter, ordering: [TeamMemberOrder!]! = []): TeamMemberTypeOffsetPaginated!
   teamMember(id: ID!): TeamMemberType!
   createTeamMemberTemplate: String!
-  koboEmergencies(pagination: OffsetPaginationInput, ordering: [KoboSubmissionOrder!]! = []): KoboEmergencyTypeOffsetPaginated!
+  koboEmergencies(pagination: OffsetPaginationInput, filters: KoboEmergencyFilter, ordering: [KoboSubmissionOrder!]! = []): KoboEmergencyTypeOffsetPaginated!
   koboHazards: [KoboHazardType!]!
   koboSubmissions(pagination: OffsetPaginationInput, filters: KoboSubmissionFilter, ordering: [KoboSubmissionOrder!]! = []): KoboSubmissionTypeOffsetPaginated!
   koboSubmission(id: ID!): KoboSubmissionType!
@@ -1328,6 +1421,10 @@ type Query {
   koboEmergency(id: ID!): KoboEmergencyDetail
   koboRapidNeeds(id: ID!): KoboRapidNeedsDetail
   koboFieldReport(id: ID!): KoboFieldReportDetail
+  pmerCategories(pagination: OffsetPaginationInput, filters: PmerCategoryFilter): PmerCategoryTypeOffsetPaginated!
+  pmerCategory(id: ID!): PmerCategoryType!
+  pmerDocumentTypes(pagination: OffsetPaginationInput, filters: PmerDocumentTypeFilter): PmerDocumentTypeTypeOffsetPaginated!
+  pmerDocumentType(id: ID!): PmerDocumentTypeType!
   pmerReports(pagination: OffsetPaginationInput, filters: PmerReportFilter, ordering: [PmerReportOrder!]! = []): PmerReportTypeOffsetPaginated!
   pmerReport(id: ID!): PmerReportType!
   enums: AppEnumCollection!
@@ -1391,6 +1488,7 @@ input ReportFilter {
   DISTINCT: Boolean
   search: String
   regions: [ID!]
+  fileTypes: [FileTypeEnum!]
 }
 
 """
@@ -1603,6 +1701,7 @@ input TeamMemberCreateInput {
 input TeamMemberFilter {
   id: ID
   teamId: ID
+  position: String
   AND: TeamMemberFilter
   OR: TeamMemberFilter
   NOT: TeamMemberFilter
@@ -1764,6 +1863,10 @@ union UpdateLinkPayload = LinkTypeMutationResponseType | OperationInfo
 union UpdateMyPasswordPayload = UserTypeMutationResponseType | OperationInfo
 
 union UpdateNewsPostPayload = NewsPostTypeMutationResponseType | OperationInfo
+
+union UpdatePmerCategoryPayload = PmerCategoryTypeMutationResponseType | OperationInfo
+
+union UpdatePmerDocumentTypePayload = PmerDocumentTypeTypeMutationResponseType | OperationInfo
 
 union UpdatePmerReportPayload = PmerReportTypeMutationResponseType | OperationInfo
 

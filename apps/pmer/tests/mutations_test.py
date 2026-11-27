@@ -3,9 +3,10 @@ import typing
 from django.core.files.uploadedfile import SimpleUploadedFile
 
 from apps.geo.factories import RegionFactory
-from apps.pmer.factories import PmerReportFactory
-from apps.pmer.models import PmerReport
+from apps.pmer.factories import PmerCategoryFactory, PmerDocumentTypeFactory, PmerReportFactory
+from apps.pmer.models import PmerCategory, PmerDocumentType, PmerReport
 from apps.users.factories import UserFactory
+from apps.users.models import User
 from main.tests import TestCase
 
 
@@ -25,10 +26,8 @@ class TestPmerReportMutations(TestCase):
                             id
                             title
                             description
-                            category
-                            categoryDisplay
-                            reportType
-                            reportTypeDisplay
+                            category { id name }
+                            reportType { id name }
                             visibility
                             visibilityDisplay
                             department
@@ -52,8 +51,8 @@ class TestPmerReportMutations(TestCase):
                             id
                             title
                             description
-                            category
-                            reportType
+                            category { id name }
+                            reportType { id name }
                             visibility
                             department
                             project
@@ -80,13 +79,20 @@ class TestPmerReportMutations(TestCase):
         cls.user = UserFactory.create()
         cls.other_user = UserFactory.create()
         cls.region = RegionFactory.create(name="Amhara")
+        cls.dpr = PmerCategoryFactory.create(name="DPR")
+        cls.drr = PmerCategoryFactory.create(name="DRR")
+        cls.volunteer = PmerCategoryFactory.create(name="Volunteer Service / Membership")
+        cls.strategic_plan = PmerDocumentTypeFactory.create(name="Strategic Plan")
+        cls.annual_plan = PmerDocumentTypeFactory.create(name="Annual Plan")
+        cls.annual_report = PmerDocumentTypeFactory.create(name="Annual Report")
+        cls.mid_term_review = PmerDocumentTypeFactory.create(name="Mid-term Review Report")
 
     def create_pmer_report(
         self,
         *,
         title: str,
-        category: PmerReport.Category,
-        report_type: PmerReport.DocumentType = PmerReport.DocumentType.ANNUAL_REPORT,
+        category: PmerCategory,
+        report_type: PmerDocumentType | None = None,
         description: str | None = None,
         department: str | None = None,
         project: str | None = None,
@@ -97,8 +103,8 @@ class TestPmerReportMutations(TestCase):
     ) -> dict[str, typing.Any]:
         data: dict[str, typing.Any] = {
             "title": title,
-            "category": self.genum(category),
-            "reportType": self.genum(report_type),
+            "category": str(category.pk),
+            "reportType": str((report_type or self.annual_report).pk),
             "file": None,
         }
         if description is not None:
@@ -123,8 +129,8 @@ class TestPmerReportMutations(TestCase):
         self.force_login(self.user)
         content = self.create_pmer_report(
             title="DRR Baseline Study",
-            category=PmerReport.Category.DRR,
-            report_type=PmerReport.DocumentType.MID_TERM_REVIEW_REPORT,
+            category=self.drr,
+            report_type=self.mid_term_review,
             description="Baseline assessment for DRR programming.",
             department="Disaster Risk Reduction",
             project="Community Resilience",
@@ -136,10 +142,8 @@ class TestPmerReportMutations(TestCase):
         assert resp["errors"] is None
         assert resp["result"]["title"] == "DRR Baseline Study"
         assert resp["result"]["description"] == "Baseline assessment for DRR programming."
-        assert resp["result"]["category"] == self.genum(PmerReport.Category.DRR)
-        assert resp["result"]["categoryDisplay"] == "DRR (Disaster Risk Reduction)"
-        assert resp["result"]["reportType"] == self.genum(PmerReport.DocumentType.MID_TERM_REVIEW_REPORT)
-        assert resp["result"]["reportTypeDisplay"] == "Mid-term Review Report"
+        assert resp["result"]["category"] == {"id": str(self.drr.pk), "name": "DRR"}
+        assert resp["result"]["reportType"] == {"id": str(self.mid_term_review.pk), "name": "Mid-term Review Report"}
         assert resp["result"]["visibility"] == self.genum(PmerReport.Visibility.PRIVATE)
         assert resp["result"]["visibilityDisplay"] == "Private"
         assert resp["result"]["department"] == "Disaster Risk Reduction"
@@ -150,7 +154,7 @@ class TestPmerReportMutations(TestCase):
 
     def test_create_pmer_report_without_optional_fields(self):
         self.force_login(self.user)
-        content = self.create_pmer_report(title="Minimal Report", category=PmerReport.Category.DPR)
+        content = self.create_pmer_report(title="Minimal Report", category=self.dpr)
         resp = content["data"]["createPmerReport"]
         assert resp["ok"] is True, resp
         assert resp["result"]["description"] is None
@@ -164,7 +168,7 @@ class TestPmerReportMutations(TestCase):
         self.logout()
         content = self.create_pmer_report(
             title="Unauthorized",
-            category=PmerReport.Category.DPR,
+            category=self.dpr,
         )
         self.assert_permission_denied(content, "createPmerReport")
         assert not PmerReport.objects.filter(title="Unauthorized").exists()
@@ -173,7 +177,7 @@ class TestPmerReportMutations(TestCase):
         self.force_login(self.user)
         content = self.create_pmer_report(
             title="Bad File",
-            category=PmerReport.Category.DPR,
+            category=self.dpr,
             file=SimpleUploadedFile("payload.exe", b"MZ", content_type="application/octet-stream"),
         )
         resp = content["data"]["createPmerReport"]
@@ -181,26 +185,27 @@ class TestPmerReportMutations(TestCase):
         assert resp["errors"] is not None
         assert not PmerReport.objects.filter(title="Bad File").exists()
 
-    def test_create_pmer_report_for_each_category(self):
+    def test_create_pmer_report_rejects_unknown_category(self):
         self.force_login(self.user)
-        for category in PmerReport.Category:
-            content = self.create_pmer_report(title=f"Report {category.name}", category=category)
-            resp = content["data"]["createPmerReport"]
-            assert resp["ok"] is True, resp
-            assert resp["result"]["category"] == self.genum(category)
-
-    def test_create_pmer_report_for_each_report_type(self):
-        self.force_login(self.user)
-        for report_type in PmerReport.DocumentType:
-            content = self.create_pmer_report(
-                title=f"Report {report_type.name}",
-                category=PmerReport.Category.DPR,
-                report_type=report_type,
-            )
-            resp = content["data"]["createPmerReport"]
-            assert resp["ok"] is True, resp
-            assert resp["result"]["reportType"] == self.genum(report_type)
-            assert resp["result"]["reportTypeDisplay"] == report_type.label
+        category = PmerCategoryFactory.create()
+        category_id = category.pk
+        category.delete()
+        content = self.query_check(
+            self.Mutation.CREATE_PMER_REPORT,
+            variables={
+                "data": {
+                    "title": "Unknown Category",
+                    "category": str(category_id),
+                    "reportType": str(self.annual_report.pk),
+                    "file": None,
+                },
+            },
+            files={"0": pdf_upload()},
+            map={"0": ["variables.data.file"]},
+        )
+        resp = content["data"]["createPmerReport"]
+        assert resp["ok"] is False, resp
+        assert not PmerReport.objects.filter(title="Unknown Category").exists()
 
     def test_create_pmer_report_requires_report_type(self):
         self.force_login(self.user)
@@ -210,7 +215,7 @@ class TestPmerReportMutations(TestCase):
             variables={
                 "data": {
                     "title": "No Report Type",
-                    "category": self.genum(PmerReport.Category.DPR),
+                    "category": str(self.dpr.pk),
                     "file": None,
                 },
             },
@@ -224,7 +229,7 @@ class TestPmerReportMutations(TestCase):
         self.force_login(self.user)
         report = PmerReportFactory.create(
             title="Old Title",
-            category=PmerReport.Category.DPR,
+            category=self.dpr,
             department="Old Department",
             project="Old Project",
             region=None,
@@ -237,8 +242,8 @@ class TestPmerReportMutations(TestCase):
                 "id": str(report.pk),
                 "data": {
                     "title": "New Title",
-                    "category": self.genum(PmerReport.Category.VOLUNTEER_SERVICE_MEMBERSHIP),
-                    "reportType": self.genum(PmerReport.DocumentType.STRATEGIC_PLAN),
+                    "category": str(self.volunteer.pk),
+                    "reportType": str(self.strategic_plan.pk),
                     "department": "Volunteer Service",
                     "project": "Membership Drive",
                     "region": str(self.region.pk),
@@ -249,8 +254,8 @@ class TestPmerReportMutations(TestCase):
         resp = content["data"]["updatePmerReport"]
         assert resp["ok"] is True, resp
         assert resp["result"]["title"] == "New Title"
-        assert resp["result"]["category"] == self.genum(PmerReport.Category.VOLUNTEER_SERVICE_MEMBERSHIP)
-        assert resp["result"]["reportType"] == self.genum(PmerReport.DocumentType.STRATEGIC_PLAN)
+        assert resp["result"]["category"]["id"] == str(self.volunteer.pk)
+        assert resp["result"]["reportType"]["id"] == str(self.strategic_plan.pk)
         assert resp["result"]["visibility"] == self.genum(PmerReport.Visibility.PRIVATE)
         assert resp["result"]["department"] == "Volunteer Service"
         assert resp["result"]["project"] == "Membership Drive"
@@ -258,8 +263,8 @@ class TestPmerReportMutations(TestCase):
 
         report.refresh_from_db()
         assert report.title == "New Title"
-        assert report.category == PmerReport.Category.VOLUNTEER_SERVICE_MEMBERSHIP
-        assert report.report_type == PmerReport.DocumentType.STRATEGIC_PLAN
+        assert report.category == self.volunteer
+        assert report.report_type == self.strategic_plan
         assert report.visibility == PmerReport.Visibility.PRIVATE
         assert report.department == "Volunteer Service"
         assert report.project == "Membership Drive"
@@ -270,8 +275,8 @@ class TestPmerReportMutations(TestCase):
         self.force_login(self.user)
         report = PmerReportFactory.create(
             title="Keep Title",
-            category=PmerReport.Category.DRR,
-            report_type=PmerReport.DocumentType.ANNUAL_PLAN,
+            category=self.drr,
+            report_type=self.annual_plan,
             department="Keep Department",
             project="Keep Project",
             region=self.region,
@@ -285,8 +290,8 @@ class TestPmerReportMutations(TestCase):
         resp = content["data"]["updatePmerReport"]
         assert resp["ok"] is True, resp
         assert resp["result"]["title"] == "Keep Title"
-        assert resp["result"]["category"] == self.genum(PmerReport.Category.DRR)
-        assert resp["result"]["reportType"] == self.genum(PmerReport.DocumentType.ANNUAL_PLAN)
+        assert resp["result"]["category"]["id"] == str(self.drr.pk)
+        assert resp["result"]["reportType"]["id"] == str(self.annual_plan.pk)
         assert resp["result"]["visibility"] == self.genum(PmerReport.Visibility.PRIVATE)
         assert resp["result"]["department"] == "Changed Department"
         assert resp["result"]["project"] == "Keep Project"
@@ -336,3 +341,104 @@ class TestPmerReportMutations(TestCase):
         resp = content["data"]["deletePmerReport"]
         assert resp["ok"] is False, resp
         assert resp["errors"][0]["messages"] == "This PMER Report no longer exists. It may already have been deleted."
+
+
+class TestPmerLookupMutations(TestCase):
+    """CRUD for the user-managed PMER categories and document types."""
+
+    LOOKUPS: typing.ClassVar = [
+        # (graphql suffix, input type, model, factory)
+        ("PmerCategory", "PmerCategoryInput", PmerCategory, PmerCategoryFactory),
+        ("PmerDocumentType", "PmerDocumentTypeInput", PmerDocumentType, PmerDocumentTypeFactory),
+    ]
+
+    @typing.override
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.viewer = UserFactory.create()
+        cls.staff = UserFactory.create(role=User.Role.STAFF)
+
+    @staticmethod
+    def create_mutation(name: str, input_type: str) -> str:
+        return f"""
+            mutation Create($data: {input_type}!) {{
+                create{name}(data: $data) {{
+                    ... on {name}TypeMutationResponseType {{ ok errors result {{ id name }} }}
+                }}
+            }}
+        """
+
+    @staticmethod
+    def update_mutation(name: str, input_type: str) -> str:
+        return f"""
+            mutation Update($id: ID!, $data: {input_type}!) {{
+                update{name}(id: $id, data: $data) {{
+                    ... on {name}TypeMutationResponseType {{ ok errors result {{ id name }} }}
+                }}
+            }}
+        """
+
+    @staticmethod
+    def delete_mutation(name: str) -> str:
+        return f"""
+            mutation Delete($id: ID!) {{
+                delete{name}(id: $id) {{ ok errors }}
+            }}
+        """
+
+    def test_staff_can_create_update_delete(self):
+        self.force_login(self.staff)
+        for name, input_type, model, _ in self.LOOKUPS:
+            op = name[0].lower() + name[1:]
+            content = self.query_check(self.create_mutation(name, input_type), variables={"data": {"name": "Original"}})
+            resp = content["data"][f"create{name}"]
+            assert resp["ok"] is True, resp
+            obj_id = resp["result"]["id"]
+            assert resp["result"]["name"] == "Original"
+
+            content = self.query_check(
+                self.update_mutation(name, input_type),
+                variables={"id": obj_id, "data": {"name": "Renamed"}},
+            )
+            resp = content["data"][f"update{name}"]
+            assert resp["ok"] is True, resp
+            assert model.objects.get(pk=obj_id).name == "Renamed"
+
+            content = self.query_check(self.delete_mutation(name), variables={"id": obj_id})
+            assert content["data"][f"delete{name}"]["ok"] is True, (op, content)
+            assert not model.objects.filter(pk=obj_id).exists()
+
+    def test_name_must_be_unique(self):
+        self.force_login(self.staff)
+        for name, input_type, model, factory in self.LOOKUPS:
+            factory.create(name="Duplicate")
+            content = self.query_check(self.create_mutation(name, input_type), variables={"data": {"name": "Duplicate"}})
+            resp = content["data"][f"create{name}"]
+            assert resp["ok"] is False, resp
+            assert model.objects.filter(name="Duplicate").count() == 1
+
+    def test_viewer_cannot_create(self):
+        self.force_login(self.viewer)
+        for name, input_type, model, _ in self.LOOKUPS:
+            content = self.query_check(self.create_mutation(name, input_type), variables={"data": {"name": "Blocked"}})
+            self.assert_permission_denied(content, f"create{name}")
+            assert not model.objects.filter(name="Blocked").exists()
+
+    def test_viewer_cannot_delete(self):
+        self.force_login(self.viewer)
+        for name, _, model, factory in self.LOOKUPS:
+            obj = factory.create()
+            content = self.query_check(self.delete_mutation(name), variables={"id": str(obj.pk)})
+            self.assert_permission_denied(content, f"delete{name}")
+            assert model.objects.filter(pk=obj.pk).exists()
+
+    def test_cannot_delete_when_in_use(self):
+        self.force_login(self.staff)
+        report = PmerReportFactory.create()
+        for name, obj in (("PmerCategory", report.category), ("PmerDocumentType", report.report_type)):
+            content = self.query_check(self.delete_mutation(name), variables={"id": str(obj.pk)})
+            resp = content["data"][f"delete{name}"]
+            assert resp["ok"] is False, resp
+            assert "still linked to 1 PMER Report" in resp["errors"][0]["messages"]
+            assert type(obj).objects.filter(pk=obj.pk).exists()

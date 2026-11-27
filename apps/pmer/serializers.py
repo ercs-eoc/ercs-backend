@@ -6,7 +6,7 @@ from rest_framework import serializers
 
 from utils.validators import validate_report_file_size
 
-from .models import PmerReport
+from .models import PmerCategory, PmerDocumentType, PmerReport
 
 ALLOWED_FILE_EXTENSIONS: list[str] = ["pdf", "doc", "docx", "xlsx", "xlsm", "png", "jpg", ".csv"]
 
@@ -16,7 +16,22 @@ validate_file_extension = FileExtensionValidator(
 )
 
 
+class PmerCategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PmerCategory
+        fields = ["name"]
+
+
+class PmerDocumentTypeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PmerDocumentType
+        fields = ["name"]
+
+
 class PmerReportSerializer(serializers.ModelSerializer):
+    category = serializers.PrimaryKeyRelatedField(queryset=PmerCategory.objects.all())
+    report_type = serializers.PrimaryKeyRelatedField(queryset=PmerDocumentType.objects.all())
+
     class Meta:
         model = PmerReport
         fields = [

@@ -4,10 +4,26 @@ from django.db import models
 from strawberry.types import Info
 
 from apps.geo.graphql.types import AdminAreaType
-from apps.pmer.models import PmerReport, PmerReportCategory, PmerReportDocumentType
+from apps.pmer.models import PmerCategory, PmerDocumentType, PmerReport
 from apps.reports.models import ReportVisibility
 from apps.users.graphql.types import UserType
 from utils.graphql.types import DjangoFileType
+
+
+@strawberry_django.type(PmerCategory)
+class PmerCategoryType:
+    id: strawberry.ID
+    name: strawberry.auto
+    created_at: strawberry.auto
+    updated_at: strawberry.auto
+
+
+@strawberry_django.type(PmerDocumentType)
+class PmerDocumentTypeType:
+    id: strawberry.ID
+    name: strawberry.auto
+    created_at: strawberry.auto
+    updated_at: strawberry.auto
 
 
 @strawberry_django.type(PmerReport)
@@ -16,8 +32,8 @@ class PmerReportType:
     title: strawberry.auto
     description: strawberry.auto
     file: DjangoFileType
-    category: PmerReportCategory
-    report_type: PmerReportDocumentType
+    category: PmerCategoryType
+    report_type: PmerDocumentTypeType
     created_by: UserType
     created_at: strawberry.auto
     updated_at: strawberry.auto
@@ -25,14 +41,6 @@ class PmerReportType:
     department: strawberry.auto
     project: strawberry.auto
     visibility: ReportVisibility
-
-    @strawberry.field
-    def category_display(self) -> str:
-        return self.get_category_display()  # type: ignore[reportAttributeAccessIssue]
-
-    @strawberry.field
-    def report_type_display(self) -> str:
-        return self.get_report_type_display()  # type: ignore[reportAttributeAccessIssue]
 
     @strawberry.field
     def visibility_display(self) -> str:

@@ -13,7 +13,7 @@ from apps.kobo.stats import (
     build_rapid_needs_detail,
 )
 
-from .filters import KoboSubmissionFilter
+from .filters import KoboEmergencyFilter, KoboSubmissionFilter
 from .orders import KoboSubmissionOrder
 from .types import (
     KoboEmergencyDetail,
@@ -45,6 +45,7 @@ class Query:
 
     # Approved ERCS Emergency Alerts, shaped as an emergencies list (paginated).
     kobo_emergencies: OffsetPaginated[KoboEmergencyType] = strawberry_django.offset_paginated(
+        filters=KoboEmergencyFilter,
         ordering=KoboSubmissionOrder,
     )
 

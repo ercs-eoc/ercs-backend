@@ -20,6 +20,7 @@ class TeamFilter:
 class TeamMemberFilter:
     id: strawberry.ID | None = strawberry.UNSET
     team_id: strawberry.ID | None = strawberry.UNSET
+    position: str | None = strawberry.UNSET
 
     @strawberry_django.filter_field
     def search(self, value: str, prefix: str) -> Q:

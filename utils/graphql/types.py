@@ -7,6 +7,8 @@ from django.db.models.fields.files import FileField, ImageField
 from strawberry.types import Info
 from strawberry_django.fields.types import field_type_map
 
+from utils.file_types import guess_content_type
+
 ResultTypeVar = typing.TypeVar("ResultTypeVar")
 
 CustomErrorType = strawberry.scalar(
@@ -50,6 +52,13 @@ class DjangoFileType:
         if isinstance(default_storage, FileSystemStorage):
             return info.context.request.build_absolute_uri(file.url)
         return file.url
+
+    @strawberry_django.field
+    def content_type(
+        self,
+        file: strawberry.Parent[typing.Any],
+    ) -> str | None:
+        return guess_content_type(file.name)
 
 
 field_type_map.update(

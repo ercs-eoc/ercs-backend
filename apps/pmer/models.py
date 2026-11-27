@@ -7,41 +7,52 @@ from apps.common.models import BaseModel
 from apps.reports.models import ReportVisibility
 
 
-class PmerReportCategory(models.IntegerChoices):
-    """Thematic category a PMER report belongs to."""
+class PmerCategory(BaseModel):
+    """User-managed thematic category a PMER report belongs to."""
 
-    DPR = 10, "DPR (Disaster Preparedness Report)"
-    DRR = 20, "DRR (Disaster Risk Reduction)"
-    HEALTH_AND_WASH = 30, "Health & WASH"
-    VOLUNTEER_SERVICE_MEMBERSHIP = 40, "Volunteer Service / Membership"
+    name = models.CharField[str, str](max_length=255, unique=True)
+
+    class Meta:  # type: ignore[reportIncompatibleVariableOverride]
+        verbose_name = "PMER Category"
+        verbose_name_plural = "PMER Categories"
+
+    @typing.override
+    def __str__(self) -> str:
+        return self.name
 
 
-class PmerReportDocumentType(models.IntegerChoices):
-    """Kind of PMER document.
+class PmerDocumentType(BaseModel):
+    """User-managed kind of PMER document (e.g. Strategic Plan, Annual Report)."""
 
-    Named `...DocumentType` rather than `PmerReportType` because the latter is
-    already the GraphQL object type for `PmerReport`; reusing it would collide
-    at registration (see `ReportType`/`ReportTypeEnum` in apps.reports).
-    """
+    name = models.CharField[str, str](max_length=255, unique=True)
 
-    STRATEGIC_PLAN = 10, "Strategic Plan"
-    ANNUAL_PLAN = 20, "Annual Plan"
-    ANNUAL_REPORT = 30, "Annual Report"
-    MID_TERM_REVIEW_REPORT = 40, "Mid-term Review Report"
+    class Meta:  # type: ignore[reportIncompatibleVariableOverride]
+        verbose_name = "PMER Document Type"
+        verbose_name_plural = "PMER Document Types"
+
+    @typing.override
+    def __str__(self) -> str:
+        return self.name
 
 
 class PmerReport(BaseModel):
     """Planning, Monitoring, Evaluation and Reporting (PMER) document."""
 
-    Category = PmerReportCategory  # convenience alias
-    DocumentType = PmerReportDocumentType  # convenience alias
     Visibility = ReportVisibility  # convenience alias
 
     title = models.CharField[str, str](max_length=500)
     description = models.TextField[str | None, str | None](null=True, blank=True)
     file = models.FileField(upload_to="pmer/")
-    category: int = IntegerChoicesField(choices_enum=PmerReportCategory)  # type: ignore[reportAssignmentType]
-    report_type: int = IntegerChoicesField(choices_enum=PmerReportDocumentType)  # type: ignore[reportAssignmentType]
+    category = models.ForeignKey(
+        PmerCategory,
+        on_delete=models.PROTECT,
+        related_name="pmer_reports",
+    )
+    report_type = models.ForeignKey(
+        PmerDocumentType,
+        on_delete=models.PROTECT,
+        related_name="pmer_reports",
+    )
     created_by = models.ForeignKey(
         "users.User",
         on_delete=models.PROTECT,
