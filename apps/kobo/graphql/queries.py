@@ -19,6 +19,7 @@ from .types import (
     KoboEmergencyDetail,
     KoboEmergencyType,
     KoboFieldReportDetail,
+    KoboHazardType,
     KoboRapidNeedsDetail,
     KoboStats,
     KoboSubmissionType,
@@ -46,6 +47,9 @@ class Query:
     kobo_emergencies: OffsetPaginated[KoboEmergencyType] = strawberry_django.offset_paginated(
         ordering=KoboSubmissionOrder,
     )
+
+    # Hazard choices of the Emergency Alert form (active only), mirrored on each sync.
+    kobo_hazards: list[KoboHazardType] = strawberry_django.field()
 
     # Full detail for one alert (by submission id) + its linked RNA / field reports.
     @strawberry.field

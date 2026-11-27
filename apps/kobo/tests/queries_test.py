@@ -2,7 +2,7 @@ import datetime
 import typing
 
 from apps.kobo.factories import KoboSubmissionFactory
-from apps.kobo.models import KoboForm, KoboSyncState
+from apps.kobo.models import KoboForm, KoboHazard, KoboSyncState
 from main.tests import TestCase
 
 
@@ -489,3 +489,25 @@ class TestKoboReportDetailQueries(TestCase):
         assert detail["responseActions"] == ["Assessment (ERCS)", "Distribution of water"]
         assert detail["typeOfReportedInformation"] == "ERCS field teams and third-party sources"
         assert detail["latestDevelopments"] == "Early action activities in Korahe zone."
+
+
+class TestKoboHazardsQuery(TestCase):
+    """Lists the active hazard choices (seeded by migration), ordered by label."""
+
+    QUERY = """
+        query KoboHazards {
+            koboHazards { code label goDisasterTypeId }
+        }
+    """
+
+    def test_lists_active_hazards_with_go_mapping(self):
+        KoboHazard.objects.filter(code="volcano").update(is_active=False)
+
+        hazards = self.query_check(self.QUERY)["data"]["koboHazards"]
+
+        codes = [h["code"] for h in hazards]
+        assert "volcano" not in codes
+        assert [h["label"] for h in hazards] == sorted(h["label"] for h in hazards)
+        by_code = {h["code"]: h for h in hazards}
+        assert by_code["conflict"]["goDisasterTypeId"] == 7
+        assert by_code["Wind storm"]["goDisasterTypeId"] is None

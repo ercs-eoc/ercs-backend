@@ -35,12 +35,15 @@ from django.utils.dateparse import parse_datetime
 
 from apps.geo.models import AdminArea, AdminAreaLevel
 from apps.kobo.labels import build_label_maps
-from apps.kobo.models import KoboForm, KoboFormSchema, KoboSubmission, KoboSyncState
+from apps.kobo.models import KoboForm, KoboFormSchema, KoboHazard, KoboSubmission, KoboSyncState
 
 logger = logging.getLogger(__name__)
 
 HTTP_TIMEOUT = 60.0
 PAGE_LIMIT = 2000
+
+# The Emergency Alert question whose choices are mirrored into `KoboHazard`.
+HAZARD_FIELD = "hazard"
 
 
 @dataclass(frozen=True)
@@ -152,10 +155,33 @@ class KoboSyncer:
                 defaults={"asset_uid": spec.asset_uid, "labels": labels, "fetched_at": timezone.now()},
             )
             self._ok(f"  {label}: schema labels updated ({len(labels['choices'])} choice lists)")
+            if spec.form == KoboForm.EMERGENCY_ALERT:
+                self.sync_hazards(labels)
         except Exception as exc:
             sentry_sdk.capture_exception(exc)
             logger.exception("Kobo schema fetch failed for %s (%s)", label, spec.asset_uid)
             self._warn(f"  {label}: SCHEMA FETCH FAILED — {exc} (existing labels kept)")
+
+    def sync_hazards(self, labels: dict[str, Any]) -> None:
+        """Mirror the Emergency Alert hazard choices into :class:`KoboHazard`.
+
+        Upserts each choice (code + label) and deactivates the ones no longer in
+        the form. ``go_disaster_type_id`` is admin-curated and left untouched. A
+        schema without the hazard list keeps the stored hazards rather than
+        deactivating them all.
+        """
+        field_spec = labels.get("fields", {}).get(HAZARD_FIELD)
+        choices: dict[str, str] = labels.get("choices", {}).get(field_spec["list"], {}) if field_spec else {}
+        if not choices:
+            logger.warning("Kobo schema has no `%s` choices; existing hazards kept", HAZARD_FIELD)
+            self._warn(f"  No `{HAZARD_FIELD}` choices in the Emergency Alert schema (existing hazards kept)")
+            return
+
+        with transaction.atomic():
+            for code, label in choices.items():
+                KoboHazard.objects.update_or_create(code=code, defaults={"label": label, "is_active": True})
+            deactivated = KoboHazard.objects.filter(is_active=True).exclude(code__in=choices).update(is_active=False)
+        self._ok(f"  Hazards updated ({len(choices)} active, {deactivated} deactivated)")
 
     def sync_form(self, spec: FormSpec, dry_run: bool = False) -> FormResult:
         self.check_config()  # `sync_form` is also called directly (tests, one-off scripts).
