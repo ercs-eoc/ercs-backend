@@ -104,6 +104,42 @@ class KoboFormSchema(BaseModel):
         return f"{self.get_form_display()} schema"  # type: ignore[reportAttributeAccessIssue]
 
 
+class KoboHazard(BaseModel):
+    """A hazard choice of the Emergency Alert form (``context/hazard``).
+
+    Mirrored from the form's choice list on every schema sync, which owns
+    ``code``, ``label`` and ``is_active``. ``go_disaster_type_id`` is curated in
+    the admin and never touched by the sync, so a choice that is removed from the
+    form is deactivated (not deleted) to keep its GO mapping if it comes back.
+    """
+
+    code = models.CharField[str, str](
+        max_length=128,
+        unique=True,
+        help_text="Kobo choice code, as stored in a submission's `context/hazard`.",
+    )
+    label = models.CharField[str, str](max_length=255)
+    is_active = models.BooleanField[bool, bool](
+        default=True,
+        help_text="Unset by the sync once the choice is no longer in the Kobo form.",
+    )
+    go_disaster_type_id = models.PositiveIntegerField[int | None, int | None](
+        null=True,
+        blank=True,
+        help_text="Equivalent IFRC GO disaster type id (GO /api/v2/disaster_type/), used to filter GO appeals. "
+        "Leave empty when GO has no matching type.",
+    )
+
+    class Meta:  # type: ignore[reportIncompatibleVariableOverride]
+        verbose_name = "Kobo Hazard"
+        verbose_name_plural = "Kobo Hazards"
+        ordering = ["label"]
+
+    @typing.override
+    def __str__(self) -> str:
+        return self.label
+
+
 class KoboSyncState(BaseModel):
     """Per-form bookkeeping for the sync job.
 

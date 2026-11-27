@@ -782,6 +782,22 @@ enum KoboForm {
   EMERGENCY_FIELD
 }
 
+"""
+A hazard choice of the ERCS Kobo Emergency Alert form, with its GO disaster type match.
+"""
+type KoboHazardType {
+  id: ID!
+
+  """Kobo choice code, as stored in a submission's `context/hazard`."""
+  code: String!
+  label: String!
+
+  """
+  Equivalent IFRC GO disaster type id (GO /api/v2/disaster_type/), used to filter GO appeals. Leave empty when GO has no matching type.
+  """
+  goDisasterTypeId: Int
+}
+
 type KoboRapidNeedsDetail {
   id: ID!
   koboId: Int!
@@ -1305,6 +1321,7 @@ type Query {
   teamMember(id: ID!): TeamMemberType!
   createTeamMemberTemplate: String!
   koboEmergencies(pagination: OffsetPaginationInput, ordering: [KoboSubmissionOrder!]! = []): KoboEmergencyTypeOffsetPaginated!
+  koboHazards: [KoboHazardType!]!
   koboSubmissions(pagination: OffsetPaginationInput, filters: KoboSubmissionFilter, ordering: [KoboSubmissionOrder!]! = []): KoboSubmissionTypeOffsetPaginated!
   koboSubmission(id: ID!): KoboSubmissionType!
   koboStats(startDate: Date = null, endDate: Date = null): KoboStats!

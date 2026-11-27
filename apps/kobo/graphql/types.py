@@ -4,7 +4,7 @@ from typing import Any
 import strawberry
 import strawberry_django
 
-from apps.kobo.models import VALIDATION_STATUS_APPROVED, KoboForm, KoboSubmission
+from apps.kobo.models import VALIDATION_STATUS_APPROVED, KoboForm, KoboHazard, KoboSubmission
 
 
 def _raw_int(raw: dict[str, Any], key: str) -> int | None:
@@ -72,6 +72,22 @@ class KoboSubmissionType:
     @strawberry.field
     def form_display(self) -> str:
         return self.get_form_display()  # type: ignore[attr-defined]
+
+
+@strawberry_django.type(
+    KoboHazard,
+    description="A hazard choice of the ERCS Kobo Emergency Alert form, with its GO disaster type match.",
+)
+class KoboHazardType:
+    id: strawberry.ID
+    code: strawberry.auto
+    label: strawberry.auto
+    go_disaster_type_id: strawberry.auto
+
+    @classmethod
+    def get_queryset(cls, queryset: Any, info: Any, **kwargs: Any) -> Any:
+        # Choices removed from the Kobo form are kept (for their GO mapping) but not offered.
+        return queryset.filter(is_active=True).order_by("label")
 
 
 @strawberry_django.type(KoboSubmission)
